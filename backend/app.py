@@ -80,6 +80,80 @@ def get_durations(video_ids: list[str]) -> dict:
                 DURATION_CACHE[v] = DEFAULT_TRACK_DURATION
     return {v: DURATION_CACHE.get(v, DEFAULT_TRACK_DURATION) for v in video_ids}
 
+# ── iTunes Artist Enrichment ─────────────────────────────
+
+ARTIST_CACHE: dict = {}  # song title → enriched artist string
+CACHE_FILE = os.path.join(os.path.dirname(__file__), ".artist_cache.json")
+
+def _load_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                ARTIST_CACHE.update(json.load(f))
+        except Exception:
+            pass
+
+def _save_cache():
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(ARTIST_CACHE, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+_load_cache()
+
+def lookup_artist_itunes(title: str, fallback: str) -> str:
+    """Look up proper artist name via iTunes Search API."""
+    if title in ARTIST_CACHE:
+        return ARTIST_CACHE[title]
+    try:
+        resp = requests.get(
+            "https://itunes.apple.com/search",
+            params={"term": title, "media": "music", "limit": 1, "entity": "song"},
+            timeout=5,
+        )
+        if resp.ok:
+            results = resp.json().get("results", [])
+            if results:
+                artist = results[0].get("artistName", fallback)
+                ARTIST_CACHE[title] = artist
+                return artist
+    except Exception:
+        pass
+    ARTIST_CACHE[title] = fallback
+    return fallback
+
+def split_artists(artist: str) -> list[str]:
+    """Split a combined artist string into individual artist names."""
+    import re
+    parts = re.split(r'\s*(?:ft\.?|feat\.?|&|,|\bx\b)\s*', artist, flags=re.IGNORECASE)
+    return [p.strip() for p in parts if p.strip()]
+
+def enrich_artists_itunes(records: list) -> None:
+    """
+    Enrich artist names in-place using iTunes Search API.
+    Only fetches unique titles not already cached.
+    Batches with small delays to avoid rate limiting.
+    """
+    unique_titles = list({r["title"]: r for r in records}.keys())
+    uncached = [t for t in unique_titles if t not in ARTIST_CACHE]
+
+    for i, title in enumerate(uncached):
+        fallback = next((r["artist"] for r in records if r["title"] == title), "Unknown Artist")
+        lookup_artist_itunes(title, fallback)
+        # Small delay every 20 requests to be polite
+        if i > 0 and i % 20 == 0:
+            time.sleep(0.3)
+
+    # Persist cache to disk
+    if uncached:
+        _save_cache()
+
+    # Apply enriched names back, split into list of all artists
+    for r in records:
+        enriched = ARTIST_CACHE.get(r["title"], r["artist"])
+        r["artists"] = split_artists(enriched)
+        r["artist"] = r["artists"][0]  # primary, kept for display
 
 # ── Parsing ──────────────────────────────────────────────
 
@@ -129,6 +203,7 @@ def parse_entries(raw_entries: list) -> list:
             "title": title,
             "video_id": video_id,
             "artist": artist or "Unknown Artist",
+            "artists": [artist or "Unknown Artist"],  # will be overwritten by enrichment
             "timestamp": ts,
             "year_month": ts.strftime("%Y-%m"),
             "date": ts.strftime("%Y-%m-%d"),
@@ -139,13 +214,14 @@ def parse_entries(raw_entries: list) -> list:
 
 # ── Analytics ────────────────────────────────────────────
 
-def compute_top_artists_by_minutes(records: list, durations: dict, top_n=5) -> list:
-    """Rank artists by total listening minutes (not play count)."""
+def compute_top_artists_by_minutes(records: list, durations: dict) -> list:
+    """Rank artists by total listening minutes — all collaborators get full credit."""
     artist_minutes = defaultdict(float)
     for r in records:
         dur = durations.get(r["video_id"], DEFAULT_TRACK_DURATION)
-        artist_minutes[r["artist"]] += dur / 60
-    
+        for artist in r.get("artists", [r["artist"]]):
+            artist_minutes[artist] += dur / 60
+
     sorted_artists = sorted(artist_minutes.items(), key=lambda x: x[1], reverse=True)
     return [{"name": a, "minutes": round(m, 1)} for a, m in sorted_artists[:10]]
 
@@ -388,6 +464,9 @@ def analyze():
         if not records:
             return jsonify({"error": "Could not parse any valid YouTube Music entries"}), 400
         
+        # Enrich artist names via iTunes
+        enrich_artists_itunes(records)
+
         # Fetch durations for all unique video IDs
         all_video_ids = list(set(r["video_id"] for r in records))
         durations = get_durations(all_video_ids)

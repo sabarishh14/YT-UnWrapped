@@ -37,7 +37,7 @@ export default function UploadPage({ onAnalysisComplete }) {
         return
       }
 
-      setLoadingMsg(`Found ${entries.length.toLocaleString()} plays. Sending to server for analysis…`)
+      setLoadingMsg(`Found ${entries.length.toLocaleString()} plays. Enriching artist names & analysing… this may take a moment.`)
 
       const response = await fetch('/api/analyze', {
         method: 'POST',
