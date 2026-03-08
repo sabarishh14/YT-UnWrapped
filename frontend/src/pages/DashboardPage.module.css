@@ -1,0 +1,159 @@
+.page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* Summary strip */
+.summaryStrip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 20px 32px;
+  overflow-x: auto;
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 100px;
+}
+
+.summaryVal {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+  font-family: var(--font-mono);
+}
+
+.summaryLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-weight: 500;
+}
+
+.summaryDivider {
+  width: 1px;
+  height: 40px;
+  background: var(--border-subtle);
+  margin: 0 32px;
+  flex-shrink: 0;
+}
+
+/* Month picker */
+.monthSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.monthLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.monthGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.monthChip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  transition: all var(--transition);
+  color: var(--text-secondary);
+}
+
+.monthChip:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.monthChipActive {
+  background: var(--yt-red) !important;
+  border-color: var(--yt-red) !important;
+  color: white !important;
+}
+
+.chipMonth {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.chipYear {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* Capsule section */
+.capsuleSection {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.capsuleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.capsuleTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.capTitleMonth {
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.capTitleYear {
+  font-size: 20px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.capsuleBadge {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--yt-red);
+  border: 1px solid rgba(255,0,0,0.3);
+  border-radius: var(--radius-full);
+  padding: 5px 14px;
+  background: rgba(255,0,0,0.06);
+}
+
+@media (max-width: 600px) {
+  .summaryStrip { flex-direction: column; align-items: flex-start; padding: 20px; gap: 16px; }
+  .summaryDivider { display: none; }
+  .capsuleHeader { flex-direction: column; align-items: flex-start; }
+}
