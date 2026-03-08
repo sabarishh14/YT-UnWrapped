@@ -2,7 +2,7 @@
 YT Music Stats — Flask Backend
 Handles: parsing, duration enrichment (YouTube Data API), and all analytics.
 """
-
+import re
 import os
 import json
 import time
@@ -17,7 +17,8 @@ app = Flask(__name__)
 CORS(app)
 
 # ── Config ──────────────────────────────────────────────
-YT_API_KEY = os.environ.get("YT_API_KEY", "")          # set this env var
+YT_API_KEY    = os.environ.get("YT_API_KEY", "")
+LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")          # set this env var
 DURATION_CACHE: dict = {}                               # video_id → seconds
 DEFAULT_TRACK_DURATION = 210                            # 3.5 min fallback
 MIN_PLAY_SECONDS = 30                                   # Spotify rule for a "play"
@@ -97,63 +98,200 @@ def _save_cache():
     try:
         with open(CACHE_FILE, "w") as f:
             json.dump(ARTIST_CACHE, f, ensure_ascii=False)
+        app.logger.info(f"Cache saved to {CACHE_FILE} ({len(ARTIST_CACHE)} entries)")
+    except Exception as e:
+        app.logger.error(f"Cache save failed: {e} — path was {CACHE_FILE}")
+
+_load_cache()
+
+# Labels, distributors, and junk values iTunes sometimes returns
+# ARTIST_BLOCKLIST = {
+#     "release", "various artists", "various", "t-series", "sony music",
+#     "universal music", "warner music", "emi", "zee music", "saregama",
+#     "tips music", "lahari music", "audio jungles", "epidemic sound",
+#     "no copyright sounds", "ncs", "topic",
+# }
+
+# def is_junk_artist(name: str) -> bool:
+#     return name.strip().lower() in ARTIST_BLOCKLIST
+
+# def lookup_artist_itunes(title: str, fallback: str) -> str:
+#     """Look up proper artist name via iTunes Search API."""
+#     if title in ARTIST_CACHE:
+#         return ARTIST_CACHE[title]
+#     try:
+#         resp = requests.get(
+#             "https://itunes.apple.com/search",
+#             params={"term": title, "media": "music", "limit": 5, "entity": "song"},
+#             timeout=5,
+#         )
+#         if resp.ok:
+#             results = resp.json().get("results", [])
+#             for result in results:
+#                 artist = result.get("artistName", "")
+#                 if artist and not is_junk_artist(artist):
+#                     ARTIST_CACHE[title] = artist
+#                     return artist
+#     except Exception:
+#         pass
+#     # iTunes gave nothing useful — use the raw channel fallback if it's not junk either
+#     clean_fallback = fallback if not is_junk_artist(fallback) else "Unknown Artist"
+#     ARTIST_CACHE[title] = clean_fallback
+#     return clean_fallback
+
+# def split_artists(artist: str) -> list[str]:
+#     """Split a combined artist string into individual artist names."""
+#     import re
+#     parts = re.split(r'\s*(?:ft\.?|feat\.?|&|,|\bx\b)\s*', artist, flags=re.IGNORECASE)
+#     return [p.strip() for p in parts if p.strip()]
+
+# def enrich_artists_itunes(records: list) -> None:
+#     """
+#     Enrich artist names in-place using iTunes Search API.
+#     Only fetches unique titles not already cached.
+#     Batches with small delays to avoid rate limiting.
+#     """
+#     unique_titles = list({r["title"]: r for r in records}.keys())
+#     uncached = [t for t in unique_titles if t not in ARTIST_CACHE]
+
+#     for i, title in enumerate(uncached):
+#         fallback = next((r["artist"] for r in records if r["title"] == title), "Unknown Artist")
+#         lookup_artist_itunes(title, fallback)
+#         # Small delay every 20 requests to be polite
+#         if i > 0 and i % 20 == 0:
+#             time.sleep(0.3)
+
+#     # Persist cache to disk
+#     if uncached:
+#         _save_cache()
+
+#     # Apply enriched names back, split into list of all artists
+#     for r in records:
+#         enriched = ARTIST_CACHE.get(r["title"], r["artist"])
+#         r["artists"] = split_artists(enriched)
+#         r["artist"] = r["artists"][0]  # primary, kept for display
+
+# ── Last.fm Artist Enrichment ────────────────────────────
+
+ARTIST_CACHE: dict = {}
+CACHE_FILE = os.path.join(os.path.dirname(__file__), ".artist_cache.json")
+
+JUNK_ARTISTS = {
+    "release", "various artists", "various", "t-series", "sony music",
+    "universal music", "warner music", "emi", "zee music", "saregama",
+    "tips music", "lahari music", "audio jungles", "epidemic sound",
+    "no copyright sounds", "ncs", "topic",
+}
+
+def _load_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, "r") as f:
+                ARTIST_CACHE.update(json.load(f))
+        except Exception:
+            pass
+
+def _save_cache():
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(ARTIST_CACHE, f, ensure_ascii=False)
     except Exception:
         pass
 
 _load_cache()
 
-def lookup_artist_itunes(title: str, fallback: str) -> str:
-    """Look up proper artist name via iTunes Search API."""
+def is_junk(name: str) -> bool:
+    return not name or name.strip().lower() in JUNK_ARTISTS
+
+def lookup_artist_lastfm(title: str, channel_artist: str) -> str:
+    """
+    Look up artist via Last.fm track.search.
+    Falls back to channel_artist if Last.fm gives nothing useful.
+    """
     if title in ARTIST_CACHE:
         return ARTIST_CACHE[title]
-    try:
-        resp = requests.get(
-            "https://itunes.apple.com/search",
-            params={"term": title, "media": "music", "limit": 1, "entity": "song"},
-            timeout=5,
-        )
-        if resp.ok:
-            results = resp.json().get("results", [])
-            if results:
-                artist = results[0].get("artistName", fallback)
-                ARTIST_CACHE[title] = artist
-                return artist
-    except Exception:
-        pass
+
+    if not LASTFM_API_KEY:
+        result = channel_artist if not is_junk(channel_artist) else "Unknown Artist"
+        ARTIST_CACHE[title] = result
+        return result
+
+    # First try: search with title + channel artist hint for precision
+    # Second try: title only if first gives junk
+    queries = [
+        {"track": title, "artist": channel_artist},
+        {"track": title},
+    ] if not is_junk(channel_artist) else [{"track": title}]
+
+    for params in queries:
+        try:
+            resp = requests.get(
+                "https://ws.audioscrobbler.com/2.0/",
+                params={
+                    "method": "track.search",
+                    "api_key": LASTFM_API_KEY,
+                    "format": "json",
+                    "limit": 5,
+                    **params,
+                },
+                timeout=5,
+            )
+            if resp.ok:
+                data = resp.json()
+                matches = (
+                    data.get("results", {})
+                    .get("trackmatches", {})
+                    .get("track", [])
+                )
+                app.logger.info(f"[LastFM] '{title}' → {[(m.get('artist'), m.get('name')) for m in matches]}")
+                for match in matches:
+                    artist = match.get("artist", "")
+                    if artist and not is_junk(artist):
+                        ARTIST_CACHE[title] = artist
+                        return artist
+            else:
+                app.logger.warning(f"[LastFM] HTTP {resp.status_code} for '{title}'")
+        except Exception as e:
+            app.logger.warning(f"[LastFM] Exception for '{title}': {e}")
+
+    # Last.fm gave nothing — use channel name if it's not junk
+    fallback = channel_artist if not is_junk(channel_artist) else "Unknown Artist"
     ARTIST_CACHE[title] = fallback
     return fallback
 
+
 def split_artists(artist: str) -> list[str]:
-    """Split a combined artist string into individual artist names."""
-    import re
+    """Split a combined artist string into individual credited artists."""
     parts = re.split(r'\s*(?:ft\.?|feat\.?|&|,|\bx\b)\s*', artist, flags=re.IGNORECASE)
     return [p.strip() for p in parts if p.strip()]
 
-def enrich_artists_itunes(records: list) -> None:
+
+def enrich_artists_lastfm(records: list) -> None:
     """
-    Enrich artist names in-place using iTunes Search API.
+    Enrich artist names in-place using Last.fm.
     Only fetches unique titles not already cached.
-    Batches with small delays to avoid rate limiting.
     """
-    unique_titles = list({r["title"]: r for r in records}.keys())
-    uncached = [t for t in unique_titles if t not in ARTIST_CACHE]
+    # Build unique (title, channel_artist) pairs not yet cached
+    seen = {}
+    for r in records:
+        if r["title"] not in seen and r["title"] not in ARTIST_CACHE:
+            seen[r["title"]] = r["artist"]
 
-    for i, title in enumerate(uncached):
-        fallback = next((r["artist"] for r in records if r["title"] == title), "Unknown Artist")
-        lookup_artist_itunes(title, fallback)
-        # Small delay every 20 requests to be polite
+    uncached = list(seen.items())  # [(title, channel_artist), ...]
+
+    for i, (title, channel_artist) in enumerate(uncached):
+        lookup_artist_lastfm(title, channel_artist)
         if i > 0 and i % 20 == 0:
-            time.sleep(0.3)
+            time.sleep(0.2)
 
-    # Persist cache to disk
     if uncached:
         _save_cache()
 
-    # Apply enriched names back, split into list of all artists
+    # Write enriched artists back to every record
     for r in records:
         enriched = ARTIST_CACHE.get(r["title"], r["artist"])
         r["artists"] = split_artists(enriched)
-        r["artist"] = r["artists"][0]  # primary, kept for display
+        r["artist"] = r["artists"][0]
 
 # ── Parsing ──────────────────────────────────────────────
 
@@ -464,8 +602,8 @@ def analyze():
         if not records:
             return jsonify({"error": "Could not parse any valid YouTube Music entries"}), 400
         
-        # Enrich artist names via iTunes
-        enrich_artists_itunes(records)
+        # Enrich artist names via Last.fm
+        enrich_artists_lastfm(records)
 
         # Fetch durations for all unique video IDs
         all_video_ids = list(set(r["video_id"] for r in records))
