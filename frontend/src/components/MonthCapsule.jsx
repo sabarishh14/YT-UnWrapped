@@ -10,7 +10,7 @@ function formatMinutes(mins) {
   return `${h}h ${m}m`
 }
 
-function RankedList({ items, valueKey, valueFormatter, maxValue }) {
+function RankedList({ items, valueKey, valueFormatter, maxValue, onClickName }) {
   return (
     <ol className={styles.rankedList}>
       {items.map((item, i) => {
@@ -23,7 +23,10 @@ function RankedList({ items, valueKey, valueFormatter, maxValue }) {
             </span>
             <div className={styles.rankInfo}>
               <div className={styles.rankNameRow}>
-                <span className={styles.rankName}>{item.name}</span>
+                <span
+                className={`${styles.rankName} ${onClickName ? styles.rankNameClickable : ''}`}
+                onClick={() => onClickName && onClickName(item.name)}
+              >{item.name}</span>
                 <span className={styles.rankValue}>{valueFormatter(value)}</span>
               </div>
               <div className={styles.rankBar}>
@@ -153,6 +156,7 @@ function HistorySection({ history }) {
           <span>#</span>
           <span>Song</span>
           <span>Artist</span>
+          <span>Album</span>
         </div>
         <div className={styles.historyBody}>
           {(visible || []).map((item, i) => (
@@ -164,8 +168,16 @@ function HistorySection({ history }) {
               rel="noopener noreferrer"
             >
               <span className={styles.historyIdx}>{i + 1}</span>
-              <span className={styles.historyTitle}>{item.title}</span>
-              <span className={styles.historyArtist}>{item.artist}</span>
+              <div className={styles.historySongCol}>
+                {item.image ? (
+                  <img src={item.image} alt="Album Art" className={styles.historyImage} loading="lazy" />
+                ) : (
+                  <div className={styles.historyImageFallback}>🎵</div>
+                )}
+                <span className={styles.historyTitle} title={item.title}>{item.title}</span>
+              </div>
+              <span className={styles.historyArtist} title={item.artist}>{item.artist}</span>
+              <span className={styles.historyAlbum} title={item.album}>{item.album || '-'}</span>
             </a>
           ))}
         </div>
@@ -181,6 +193,25 @@ function HistorySection({ history }) {
 }
 
 export default function MonthCapsule({ data }) {
+  const [artistDetail, setArtistDetail] = React.useState(null)
+
+  const artistSongs = React.useMemo(() => {
+    if (!artistDetail || !data.history) return []
+    const songMinutes = {}
+    const songPlays = {}
+    for (const item of data.history) {
+      const artists = item.artist ? item.artist.split(/,|&|ft\.|feat\./i).map(a => a.trim()) : []
+      if (artists.some(a => a.toLowerCase() === artistDetail.toLowerCase())) {
+        const key = item.title
+        songMinutes[key] = (songMinutes[key] || 0) + item.duration_seconds / 60
+        songPlays[key] = (songPlays[key] || 0) + 1
+      }
+    }
+    return Object.entries(songMinutes)
+      .map(([title, minutes]) => ({ title, minutes: Math.round(minutes * 10) / 10, plays: songPlays[title] }))
+      .sort((a, b) => b.minutes - a.minutes)
+  }, [artistDetail, data.history])
+
   const {
     total_plays, total_minutes, top_artists, top_songs,
     streak, throwback, days_active,
@@ -220,7 +251,7 @@ export default function MonthCapsule({ data }) {
           </div>
           <div className={styles.cardBody}>
             {top_artists?.length > 0
-              ? <RankedList items={top_artists} valueKey="minutes" valueFormatter={formatMinutes} maxValue={maxArtist} />
+              ? <RankedList items={top_artists} valueKey="minutes" valueFormatter={formatMinutes} maxValue={maxArtist} onClickName={setArtistDetail} />
               : <p className={styles.empty}>No data</p>}
           </div>
         </div>
@@ -304,6 +335,37 @@ export default function MonthCapsule({ data }) {
 
       {/* ── History ── */}
       <HistorySection history={history} />
+
+      {/* ── Artist detail drawer ── */}
+      {artistDetail && (
+        <div className={styles.drawerOverlay} onClick={() => setArtistDetail(null)}>
+          <div className={styles.drawer} onClick={e => e.stopPropagation()}>
+            <div className={styles.drawerHeader}>
+              <div>
+                <p className={styles.drawerSub}>Artist breakdown</p>
+                <h3 className={styles.drawerTitle}>{artistDetail}</h3>
+              </div>
+              <button className={styles.drawerClose} onClick={() => setArtistDetail(null)}>✕</button>
+            </div>
+            <div className={styles.drawerBody}>
+              {artistSongs.length === 0 ? (
+                <p className={styles.empty}>No songs found</p>
+              ) : (
+                <ol className={styles.drawerList}>
+                  {artistSongs.map((s, i) => (
+                    <li key={i} className={styles.drawerItem}>
+                      <span className={styles.drawerIdx}>{i + 1}</span>
+                      <span className={styles.drawerSongName}>{s.title}</span>
+                      <span className={styles.drawerPlays}>{s.plays}×</span>
+                      <span className={styles.drawerMins}>{formatMinutes(s.minutes)}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
