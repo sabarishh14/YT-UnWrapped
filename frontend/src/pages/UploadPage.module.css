@@ -300,3 +300,139 @@
   color: var(--text-primary);
   background: var(--bg-hover);
 }
+
+/* Tabs Container */
+.tabContainer {
+  display: flex;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.activeTab {
+  background: var(--bg-secondary);
+  color: var(--yt-red);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.contentArea {
+  width: 100%;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Sync Button Update */
+.syncButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.syncButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: white;
+}
+
+.syncButton:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Unified Grid Layout */
+.optionsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+  width: 100%;
+  max-width: 800px;
+}
+
+@media (min-width: 768px) {
+  .optionsGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.optionCard {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: center;
+}
+
+.optionHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.optionTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.optionDesc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* Fix Loading Alignment */
+.loadingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.loadingMsg {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}

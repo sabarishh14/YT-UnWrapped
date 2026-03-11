@@ -1,5 +1,6 @@
 import React from 'react'
 import styles from './MonthCapsule.module.css'
+import TopRankings from './TopRankings.jsx'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -8,36 +9,6 @@ function formatMinutes(mins) {
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
-}
-
-function RankedList({ items, valueKey, valueFormatter, maxValue, onClickName }) {
-  return (
-    <ol className={styles.rankedList}>
-      {items.map((item, i) => {
-        const value = item[valueKey]
-        const pct = maxValue ? (value / maxValue) * 100 : 0
-        return (
-          <li key={i} className={styles.rankItem}>
-            <span className={`${styles.rankNum} ${i === 0 ? styles.rankGold : i < 3 ? styles.rankSilver : ''}`}>
-              {i + 1}
-            </span>
-            <div className={styles.rankInfo}>
-              <div className={styles.rankNameRow}>
-                <span
-                className={`${styles.rankName} ${onClickName ? styles.rankNameClickable : ''}`}
-                onClick={() => onClickName && onClickName(item.name)}
-              >{item.name}</span>
-                <span className={styles.rankValue}>{valueFormatter(value)}</span>
-              </div>
-              <div className={styles.rankBar}>
-                <div className={styles.rankFill} style={{ width: `${pct}%`, opacity: 0.9 - i * 0.06 }} />
-              </div>
-            </div>
-          </li>
-        )
-      })}
-    </ol>
-  )
 }
 
 const TIME_SLOTS = [
@@ -213,22 +184,22 @@ export default function MonthCapsule({ data }) {
   }, [artistDetail, data.history])
 
   const {
-    total_plays, total_minutes, top_artists, top_songs,
+    total_plays, total_minutes, top_artists, top_songs, top_albums, top_music_directors,
     streak, throwback, days_active,
     weekly_breakdown, day_of_week, hour_heatmap, history,
   } = data
 
   const maxArtist = top_artists?.[0]?.minutes || 1
   const maxSong   = top_songs?.[0]?.plays || 1
+  const maxDirector = top_music_directors?.[0]?.minutes || 1
   const hrs  = Math.floor(total_minutes / 60)
   const mins = Math.round(total_minutes % 60)
 
   return (
     <div className={styles.capsule}>
 
-      {/* ── Top row: Playtime + Artists + Songs ── */}
-      <div className={styles.topRow}>
-
+      {/* ── 1. Hero Row: Playtime, Streak, Throwback ── */}
+      <div className={styles.heroRow}>
         <div className={`${styles.card} ${styles.playtimeCard}`}>
           <div className={styles.cardHeader}>
             <span className={styles.cardIcon}>⏱</span>
@@ -243,35 +214,6 @@ export default function MonthCapsule({ data }) {
             <div className={styles.playtimeMeta}>{total_plays.toLocaleString()} plays · {days_active} active days</div>
           </div>
         </div>
-
-        <div className={`${styles.card} ${styles.rankCard}`}>
-          <div className={styles.cardHeader}>
-            <span className={styles.cardIcon}>🎤</span>
-            <span className={styles.cardTitle}>Top Artists <span className={styles.cardSub}>by time</span></span>
-          </div>
-          <div className={styles.cardBody}>
-            {top_artists?.length > 0
-              ? <RankedList items={top_artists} valueKey="minutes" valueFormatter={formatMinutes} maxValue={maxArtist} onClickName={setArtistDetail} />
-              : <p className={styles.empty}>No data</p>}
-          </div>
-        </div>
-
-        <div className={`${styles.card} ${styles.rankCard}`}>
-          <div className={styles.cardHeader}>
-            <span className={styles.cardIcon}>🎵</span>
-            <span className={styles.cardTitle}>Top Songs <span className={styles.cardSub}>by plays</span></span>
-          </div>
-          <div className={styles.cardBody}>
-            {top_songs?.length > 0
-              ? <RankedList items={top_songs} valueKey="plays" valueFormatter={v => `${v}×`} maxValue={maxSong} />
-              : <p className={styles.empty}>No data</p>}
-          </div>
-        </div>
-
-      </div>
-
-      {/* ── Mid row: Streak + Throwback ── */}
-      <div className={styles.midRow}>
 
         <div className={styles.card}>
           <div className={styles.cardHeader}>
@@ -327,13 +269,29 @@ export default function MonthCapsule({ data }) {
             )}
           </div>
         </div>
-
       </div>
 
-      {/* ── Patterns ── */}
+      {/* ── 2. Top Boards (2x2 Grid) ── */}
+      <div className={styles.rankingsSection}>
+        <div className={styles.sectionLabel}>Your Top Boards</div>
+        <div className={styles.rankingsGrid}>
+          <TopRankings 
+            top_artists={top_artists} 
+            top_songs={top_songs} 
+            top_albums={top_albums} 
+            top_music_directors={top_music_directors}
+            maxArtist={maxArtist} 
+            maxSong={maxSong} 
+            maxDirector={maxDirector}
+            setArtistDetail={setArtistDetail} 
+          />
+        </div>
+      </div>
+
+      {/* ── 3. Patterns ── */}
       <TimeBreakdown weekly={weekly_breakdown} dow={day_of_week} hours={hour_heatmap} />
 
-      {/* ── History ── */}
+      {/* ── 4. Full History ── */}
       <HistorySection history={history} />
 
       {/* ── Artist detail drawer ── */}

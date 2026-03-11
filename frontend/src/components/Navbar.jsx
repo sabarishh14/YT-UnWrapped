@@ -16,7 +16,7 @@ export default function Navbar({ onReset, fileName }) {
           <YTMusicIcon />
           <span className={styles.brandText}>
             <span className={styles.brandYT}>YT Music</span>
-            <span className={styles.brandStats}>Stats</span>
+            <span className={styles.brandStats}>UnWrapped</span>
           </span>
         </button>
 

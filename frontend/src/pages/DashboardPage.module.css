@@ -157,3 +157,31 @@
   .summaryDivider { display: none; }
   .capsuleHeader { flex-direction: column; align-items: flex-start; }
 }
+
+.summaryStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* Change gap to justify-content */
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 24px 32px;
+  overflow-x: auto;
+}
+
+.ytdLabel {
+  font-size: 11px;
+  color: var(--yt-red);
+  font-weight: 500;
+  margin-top: 2px;
+  opacity: 0.8;
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px; /* Reduced gap to fit extra label */
+  flex: 1;
+  min-width: 130px;
+}

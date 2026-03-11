@@ -176,12 +176,7 @@
   transition: width 0.7s cubic-bezier(0.4,0,0.2,1);
 }
 
-/* ── Mid row: Streak + Throwback ── */
-.midRow {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-}
+
 
 .streakContent {
   display: flex;
@@ -697,4 +692,29 @@
 
 @media (max-width: 480px) {
   .drawer { width: 100vw; }
+}
+
+/* ── Layout Grids ── */
+.heroRow {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.rankingsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rankingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 1024px) {
+  .heroRow { grid-template-columns: 1fr; }
+  .rankingsGrid { grid-template-columns: 1fr; }
 }
