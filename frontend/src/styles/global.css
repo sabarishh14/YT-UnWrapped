@@ -1,30 +1,37 @@
-/* ── YouTube Music Stats — Global Styles ── */
+/* ── YT Music UnWrapped — Global Styles ── */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+
 :root {
   --yt-red: #FF0000;
   --yt-red-dark: #cc0000;
-  --yt-red-glow: rgba(255, 0, 0, 0.15);
-  --bg-primary: #0f0f0f;
-  --bg-secondary: #161616;
-  --bg-elevated: #1f1f1f;
-  --bg-card: #212121;
-  --bg-hover: #2a2a2a;
-  --border-subtle: rgba(255,255,255,0.08);
-  --border-strong: rgba(255,255,255,0.15);
-  --text-primary: #f1f1f1;
-  --text-secondary: #aaaaaa;
-  --text-muted: #717171;
-  --text-red: #FF0000;
-  --chip-bg: #272727;
-  --font-main: 'Roboto', sans-serif;
-  --font-mono: 'Roboto Mono', monospace;
+  --yt-red-glow: rgba(255, 0, 0, 0.18);
+  --yt-red-subtle: rgba(255, 0, 0, 0.07);
+  --bg-primary: #080808;
+  --bg-secondary: #0f0f0f;
+  --bg-elevated: #161616;
+  --bg-card: #141414;
+  --bg-card-hover: #1a1a1a;
+  --bg-hover: #1e1e1e;
+  --border-subtle: rgba(255,255,255,0.06);
+  --border-strong: rgba(255,255,255,0.12);
+  --border-red: rgba(255, 0, 0, 0.25);
+  --text-primary: #f9f9f9;
+  --text-secondary: #999;
+  --text-muted: #555;
+  --chip-bg: #1c1c1c;
+  --font-main: 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
   --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
-  --shadow-card: 0 2px 12px rgba(0,0,0,0.4);
-  --shadow-elevated: 0 8px 32px rgba(0,0,0,0.6);
-  --transition: 0.15s ease;
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.3);
+  --shadow-elevated: 0 8px 40px rgba(0,0,0,0.7);
+  --shadow-red: 0 0 40px rgba(255,0,0,0.12);
+  --transition: 0.18s ease;
+  --transition-slow: 0.35s ease;
 }
 
 *, *::before, *::after {
@@ -33,9 +40,7 @@
   padding: 0;
 }
 
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
 body {
   font-family: var(--font-main);
@@ -44,13 +49,16 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255,0,0,0.06) 0%, transparent 60%);
+  background-attachment: fixed;
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #666; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
 
 /* Focus */
 :focus-visible {
@@ -63,18 +71,11 @@ a { color: inherit; text-decoration: none; }
 button { cursor: pointer; font-family: inherit; border: none; background: none; }
 img { max-width: 100%; display: block; }
 
-/* Utilities */
 .sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0,0,0,0);
-  white-space: nowrap;
+  position: absolute; width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap;
 }
 
 .truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }

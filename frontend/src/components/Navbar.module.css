@@ -2,17 +2,17 @@
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(15, 15, 15, 0.92);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(8, 8, 8, 0.85);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border-bottom: 1px solid var(--border-subtle);
-  height: 56px;
+  height: 58px;
 }
 
 .inner {
-  max-width: 1280px;
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 28px;
   height: 100%;
   display: flex;
   align-items: center;
@@ -22,44 +22,48 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   background: none;
   border: none;
   cursor: pointer;
   padding: 0;
   transition: opacity var(--transition);
 }
-.brand:hover { opacity: 0.85; }
+.brand:hover { opacity: 0.8; }
 
 .brandText {
   display: flex;
   align-items: baseline;
-  gap: 4px;
-  font-size: 16px;
-  font-weight: 500;
-  letter-spacing: -0.2px;
+  gap: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
 }
 
-.brandYT { color: var(--yt-red); font-weight: 700; }
-.brandStats { color: var(--text-primary); font-weight: 400; }
+.brandYT { color: var(--yt-red); font-weight: 800; }
+.brandStats { color: var(--text-primary); font-weight: 300; opacity: 0.9; }
 
 .right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .fileName {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  background: var(--chip-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 5px 12px;
 }
 
 .resetBtn {
@@ -72,8 +76,9 @@
   background: var(--chip-bg);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-full);
-  padding: 6px 14px;
+  padding: 7px 16px;
   transition: all var(--transition);
+  letter-spacing: -0.1px;
 }
 .resetBtn:hover {
   background: var(--bg-hover);

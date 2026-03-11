@@ -1,69 +1,91 @@
 .page {
-  max-width: 1100px;
+  max-width: 1160px;
   margin: 0 auto;
-  padding: 32px 24px 80px;
+  padding: 40px 28px 100px;
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 48px;
 }
 
-/* Summary strip */
+/* ── Summary Strip ── */
 .summaryStrip {
   display: flex;
   align-items: center;
-  gap: 0;
-  background: var(--bg-elevated);
+  justify-content: space-between;
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  padding: 20px 32px;
+  border-radius: var(--radius-2xl);
+  padding: 28px 40px;
   overflow-x: auto;
+  position: relative;
+  overflow: hidden;
+}
+
+.summaryStrip::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--yt-red), transparent);
+  opacity: 0.6;
 }
 
 .summaryItem {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 6px;
   flex: 1;
-  min-width: 100px;
+  min-width: 120px;
+  padding: 4px 0;
 }
 
 .summaryVal {
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.5px;
+  letter-spacing: -1px;
+  line-height: 1;
   font-family: var(--font-mono);
 }
 
 .summaryLabel {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 1px;
   font-weight: 500;
+}
+
+.ytdLabel {
+  font-size: 10px;
+  color: var(--yt-red);
+  font-weight: 500;
+  margin-top: 1px;
+  opacity: 0.8;
 }
 
 .summaryDivider {
   width: 1px;
-  height: 40px;
+  height: 44px;
   background: var(--border-subtle);
-  margin: 0 32px;
+  margin: 0 16px;
   flex-shrink: 0;
 }
 
-/* Month picker */
+/* ── Month Section ── */
 .monthSection {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .monthLabel {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 1.2px;
 }
 
 .monthGrid {
@@ -77,41 +99,59 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 8px 16px;
-  background: var(--bg-elevated);
+  padding: 10px 18px;
+  background: var(--bg-card);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-lg);
   transition: all var(--transition);
   color: var(--text-secondary);
+  position: relative;
+  overflow: hidden;
+}
+
+.monthChip::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--yt-red);
+  opacity: 0;
+  transition: opacity var(--transition);
 }
 
 .monthChip:hover {
-  background: var(--bg-hover);
   border-color: var(--border-strong);
   color: var(--text-primary);
+  transform: translateY(-1px);
 }
 
 .monthChipActive {
   background: var(--yt-red) !important;
   border-color: var(--yt-red) !important;
   color: white !important;
+  box-shadow: 0 4px 20px rgba(255, 0, 0, 0.3);
 }
 
 .chipMonth {
   font-size: 13px;
   font-weight: 600;
+  position: relative;
+  z-index: 1;
+  letter-spacing: -0.2px;
 }
 
 .chipYear {
   font-size: 10px;
-  opacity: 0.7;
+  opacity: 0.65;
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
 }
 
-/* Capsule section */
+/* ── Capsule Section ── */
 .capsuleSection {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
 }
 
 .capsuleHeader {
@@ -128,60 +168,36 @@
 }
 
 .capTitleMonth {
-  font-size: 32px;
+  font-size: 36px;
   font-weight: 700;
   color: var(--text-primary);
-  letter-spacing: -0.5px;
+  letter-spacing: -1px;
+  line-height: 1;
 }
 
 .capTitleYear {
-  font-size: 20px;
-  font-weight: 400;
+  font-size: 22px;
+  font-weight: 300;
   color: var(--text-muted);
+  letter-spacing: -0.3px;
 }
 
 .capsuleBadge {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   color: var(--yt-red);
-  border: 1px solid rgba(255,0,0,0.3);
+  border: 1px solid rgba(255,0,0,0.25);
   border-radius: var(--radius-full);
-  padding: 5px 14px;
+  padding: 6px 16px;
   background: rgba(255,0,0,0.06);
 }
 
-@media (max-width: 600px) {
-  .summaryStrip { flex-direction: column; align-items: flex-start; padding: 20px; gap: 16px; }
+@media (max-width: 640px) {
+  .summaryStrip { flex-direction: column; align-items: flex-start; padding: 24px; gap: 20px; }
   .summaryDivider { display: none; }
+  .summaryItem { align-items: flex-start; }
   .capsuleHeader { flex-direction: column; align-items: flex-start; }
-}
-
-.summaryStrip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between; /* Change gap to justify-content */
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  padding: 24px 32px;
-  overflow-x: auto;
-}
-
-.ytdLabel {
-  font-size: 11px;
-  color: var(--yt-red);
-  font-weight: 500;
-  margin-top: 2px;
-  opacity: 0.8;
-}
-
-.summaryItem {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px; /* Reduced gap to fit extra label */
-  flex: 1;
-  min-width: 130px;
+  .capTitleMonth { font-size: 28px; }
 }
