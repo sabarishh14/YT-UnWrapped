@@ -25,7 +25,7 @@ export default function App() {
     if (storedLastFm !== null) setLastFmUser(storedLastFm)
 
     // Try auto-loading data from local DB immediately
-    fetch('${API_BASE}/api/analyze', {
+    fetch(`${API_BASE}/api/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries: [], user_id: storedId, lastfm_username: storedLastFm || "" })
