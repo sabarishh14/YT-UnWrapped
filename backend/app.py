@@ -17,7 +17,16 @@ from ytmusicapi import YTMusic
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:3000",
+            "https://yt-un-wrapped.vercel.app/" # The URL Vercel gives you
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 YT_API_KEY     = os.environ.get("YT_API_KEY", "")
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
@@ -782,7 +791,7 @@ def health():
         "lastfm_api":       bool(LASTFM_API_KEY),
         "cached_artists":   len(ARTIST_CACHE),
         "cached_durations": len(DURATION_CACHE),
-        "cache_file":       CACHE_FILE,
+        "cache_file":       LOCAL_DB_PATH,
     })
 
 if __name__ == "__main__":

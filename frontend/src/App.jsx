@@ -3,6 +3,8 @@ import UploadPage from './pages/UploadPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 export default function App() {
   const [analysisData, setAnalysisData] = useState(null)
   const [fileName, setFileName] = useState('')
@@ -23,7 +25,7 @@ export default function App() {
     if (storedLastFm !== null) setLastFmUser(storedLastFm)
 
     // Try auto-loading data from local DB immediately
-    fetch('/api/analyze', {
+    fetch('${API_BASE}/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries: [], user_id: storedId, lastfm_username: storedLastFm || "" })

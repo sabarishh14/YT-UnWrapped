@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from 'react'
 import styles from './UploadPage.module.css'
 
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onSaveLastFm }) {
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -15,7 +17,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
 
     return setInterval(async () => {
       try {
-        const res = await fetch('/api/progress')
+        const res = await fetch('${API_BASE}/api/progress')
         const data = await res.json()
         
         if (data.total > 0 && data.processed > 0) {
@@ -53,7 +55,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
     const pollId = startProgressPolling()
 
     try {
-      const response = await fetch('/api/analyze', {
+      const response = await fetch('${API_BASE}/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries: [], user_id: userId, lastfm_username: lastFmUser }), 
@@ -89,7 +91,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
       setLoadingMsg('Starting analysis...')
       const pollId = startProgressPolling()
 
-      const response = await fetch('/api/analyze', {
+      const response = await fetch('${API_BASE}/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ entries, user_id: userId, lastfm_username: lastFmUser || "" }),
