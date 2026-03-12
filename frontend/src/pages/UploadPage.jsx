@@ -11,12 +11,34 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
   const inputRef = useRef()
 
   const startProgressPolling = () => {
+    const startTime = Date.now() // Track when we started to calculate speed
+
     return setInterval(async () => {
       try {
         const res = await fetch('/api/progress')
         const data = await res.json()
-        if (data.total > 0) {
-          setLoadingMsg(`${data.message}\n(${data.processed} / ${data.total} tracks)`)
+        
+        if (data.total > 0 && data.processed > 0) {
+          // Calculate Estimated Time Remaining
+          const elapsedSec = (Date.now() - startTime) / 1000
+          const tracksPerSec = data.processed / elapsedSec
+          const remainingTracks = data.total - data.processed
+          const remainingSec = Math.round(remainingTracks / tracksPerSec)
+
+          let etaStr = ''
+          if (remainingSec > 60) {
+            const m = Math.floor(remainingSec / 60)
+            const s = remainingSec % 60
+            etaStr = `~${m}m ${s}s remaining`
+          } else if (remainingSec > 0) {
+            etaStr = `~${remainingSec}s remaining`
+          } else {
+            etaStr = 'Almost done...'
+          }
+
+          setLoadingMsg(`${data.message}\n(${data.processed} / ${data.total} tracks)\n${etaStr}`)
+        } else if (data.total > 0) {
+          setLoadingMsg(`${data.message}\n(0 / ${data.total} tracks)\nCalculating time...`)
         } else {
           setLoadingMsg(data.message)
         }
@@ -91,6 +113,36 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
     processFile(e.dataTransfer.files[0])
   }, [processFile])
 
+  // ── CINEMATIC LOADING OVERLAY ──
+  if (loading || syncing) {
+    const msgParts = loadingMsg.split('\n')
+    const mainText = msgParts[0] || 'Unwrapping...'
+    const progressText = msgParts[1] || ''
+    const etaText = msgParts[2] || ''
+
+    return (
+      <div className={styles.cinematicWrapper}>
+        <div className={styles.ambientOrb} />
+        <div className={styles.cinematicContent}>
+          <div className={styles.logoRingCinematic}>
+            <svg width="80" height="80" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="28" fill="#FF0000" opacity="0.12"/>
+              <circle cx="28" cy="28" r="20" fill="#FF0000" opacity="0.18"/>
+              <circle cx="28" cy="28" r="13" fill="#FF0000"/>
+              <circle cx="28" cy="28" r="5.5" fill="white"/>
+              <circle cx="28" cy="28" r="2.5" fill="#FF0000"/>
+            </svg>
+          </div>
+          <h2 className={styles.cinematicText}>{mainText}</h2>
+          <div className={styles.cinematicSubtext}>
+            {progressText && <p className={styles.progressLine}>{progressText}</p>}
+            {etaText && <p className={styles.etaLine}>{etaText}</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
   return (
     <div className={styles.page}>
       <div className={styles.hero}>

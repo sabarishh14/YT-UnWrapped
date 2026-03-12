@@ -57,11 +57,16 @@ export default function App() {
     setLastFmUser(name)
   }
 
-  const handleReset = () => {
+  const handleGoBack = () => {
+    // Just go back to the upload screen, keep the ID so data merges!
+    setAnalysisData(null)
+  }
+
+  const handleClearData = () => {
+    // Truly wipe everything and start fresh
     setAnalysisData(null)
     setFileName('')
     
-    // FIX: Wipe local ID so clicking "New File" gives a 100% clean slate in the DB too
     const newId = 'user_' + Math.random().toString(36).substring(2, 10)
     localStorage.setItem('yt_user_id', newId)
     setUserId(newId)
@@ -73,7 +78,11 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Navbar onReset={analysisData ? handleReset : null} fileName={fileName} />
+      <Navbar 
+        onGoBack={analysisData ? handleGoBack : null} 
+        onClear={analysisData ? handleClearData : null} 
+        fileName={fileName} 
+      />
       <main style={{ flex: 1 }}>
         {!analysisData
           ? <UploadPage 

@@ -163,10 +163,67 @@ function HistorySection({ history }) {
   )
 }
 
-export default function MonthCapsule({ data }) {
+export default function MonthCapsule({ data, monthLabel }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
+  const capsuleRef = React.useRef(null)
+  const posterRef = React.useRef(null) // <--- ADD THIS
+  const [isDownloading, setIsDownloading] = React.useState(false)
+  
+  // --- NEW: Let the user control the list size ---
+  const [showTop10, setShowTop10] = React.useState(false) 
+
+  const handleDownload = async () => {
+    // 1. Make sure the hidden poster exists
+    if (!posterRef.current) return
+    setIsDownloading(true)
+    
+    try {
+      const { toPng } = await import('html-to-image')
+      
+      // 2. Instantly take the picture of the HIDDEN poster (no delays needed!)
+      const dataUrl = await toPng(posterRef.current, {
+        cacheBust: true,
+        backgroundColor: '#050505',
+        canvasWidth: 1080,
+        canvasHeight: 1920,
+        // Bring back the glowing red glass effect!
+        style: {
+          backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(255, 0, 0, 0.15) 0%, transparent 60%), radial-gradient(circle at 90% 90%, rgba(255, 50, 50, 0.15) 0%, transparent 60%)',
+        }
+      })
+      
+      const filename = `YT-Unwrapped-${monthLabel.replace(' ', '-')}.png`
+
+      const blob = await (await fetch(dataUrl)).blob()
+      const file = new File([blob], filename, { type: 'image/png' })
+
+      // 3. Try to open the Native Share Menu
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: `${monthLabel} Unwrapped`,
+            text: `Check out my YouTube Music Unwrapped for ${monthLabel}!`,
+            files: [file]
+          })
+        } catch (shareErr) {
+          console.log('User canceled the share.', shareErr)
+        }
+      } else {
+        // Fallback: Download if on HTTP (local Wi-Fi) or unsupported browser
+        const link = document.createElement('a')
+        link.download = filename
+        link.href = dataUrl
+        link.click()
+      }
+    } catch (err) {
+      console.error('Failed to capture snapshot', err)
+    }
+    
+    setIsDownloading(false)
+  }
 
   const artistSongs = React.useMemo(() => {
+    // ... KEEP YOUR EXISTING artistSongs logic here ...
     if (!artistDetail || !data.history) return []
     const songMinutes = {}
     const songPlays = {}
@@ -194,105 +251,211 @@ export default function MonthCapsule({ data }) {
   const maxDirector = top_music_directors?.[0]?.minutes || 1
   const hrs  = Math.floor(total_minutes / 60)
   const mins = Math.round(total_minutes % 60)
+  
+  // Calculate unique counts for the Discovery card
+  const uniqueArtistsCount = React.useMemo(() => new Set((data.history || []).map(item => item.artist)).size, [data.history])
+  const uniqueSongsCount = React.useMemo(() => new Set((data.history || []).map(item => item.title)).size, [data.history])
 
   return (
-    <div className={styles.capsule}>
-
-      {/* ── 1. Hero Row: Playtime, Streak, Throwback ── */}
-      <div className={styles.heroRow}>
-        <div className={`${styles.card} ${styles.playtimeCard}`}>
-          <div className={styles.cardHeader}>
-            <span className={styles.cardIcon}>⏱</span>
-            <span className={styles.cardTitle}>Total Playtime</span>
+    <>
+      {/* ── HIDDEN 9:16 EXPORT POSTER ── */}
+      <div className={styles.exportPosterWrapper}>
+        <div className={styles.exportPoster} ref={posterRef}>
+          
+          <div className={styles.posterHeader}>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="12" fill="#FF0000"/>
+              <circle cx="12" cy="12" r="4.5" fill="white"/>
+              <circle cx="12" cy="12" r="2" fill="#FF0000"/>
+            </svg>
+            <h1 className={styles.posterTitle}>{monthLabel}</h1>
           </div>
-          <div className={styles.playtimeBody}>
-            <div className={styles.playtimeMain}>
-              <span className={styles.playtimeMins}>{Math.round(total_minutes).toLocaleString()}</span>
-              <span className={styles.playtimeUnit}>min</span>
+
+          <div className={styles.posterHero}>
+            <p style={{ fontSize: '32px', color: '#ffb3b3', margin: 0 }}>Total Playtime</p>
+            <h2 style={{ fontSize: '120px', fontWeight: 900, margin: 0, color: 'white', lineHeight: '1' }}>
+              {Math.round(total_minutes).toLocaleString()} <span style={{ fontSize: '40px', color: '#888' }}>mins</span>
+            </h2>
+          </div>
+
+          <div className={styles.posterGrid}>
+            <div className={styles.posterCard}>
+              <h3 className={styles.posterCardTitle}>Top Artists</h3>
+              {top_artists?.slice(0, 5).map((a, i) => (
+                i === 0 ? (
+                  <div key={i} className={styles.posterHeroCard}>
+                    <span className={styles.posterHeroCrown}>#1 Artist</span>
+                    <span className={styles.posterHeroName}>{a.name}</span>
+                  </div>
+                ) : (
+                  <div key={i} className={styles.posterRow}>
+                    <span className={styles.posterNum}>{i + 1}</span>
+                    <span className={styles.posterName}>{a.name}</span>
+                  </div>
+                )
+              ))}
             </div>
-            <div className={styles.playtimeHours}>{hrs}h {mins}m</div>
-            <div className={styles.playtimeMeta}>{total_plays.toLocaleString()} plays · {days_active} active days</div>
-          </div>
-        </div>
 
-        <div className={styles.card}>
-          <div className={styles.cardHeader}>
-            <span className={styles.cardIcon}>🔥</span>
-            <span className={styles.cardTitle}>The Streak</span>
+            <div className={styles.posterCard}>
+              <h3 className={styles.posterCardTitle}>Top Songs</h3>
+              {top_songs?.slice(0, 5).map((s, i) => (
+                i === 0 ? (
+                  <div key={i} className={styles.posterHeroCard}>
+                    <span className={styles.posterHeroCrown}>#1 Song</span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span className={styles.posterHeroName}>{s.name}</span>
+                      <span style={{ fontSize: '28px', color: '#ffb3b3', marginTop: '4px' }}>{s.artist}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div key={i} className={styles.posterRow}>
+                    <span className={styles.posterNum}>{i + 1}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span className={styles.posterName}>{s.name}</span>
+                      <span style={{ fontSize: '20px', color: '#888' }}>{s.artist}</span>
+                    </div>
+                  </div>
+                )
+              ))}
+            </div>
           </div>
-          <div className={styles.cardBody}>
+
+          <div className={styles.posterFooter}>YT Music Unwrapped</div>
+        </div>
+      </div>
+    <div className={styles.capsuleWrapper}>
+      {/* We wrap the content in a div with the ref, so the snapshot only captures the stats, not the whole page background */}
+      <div className={styles.capsule} style={{ padding: '24px' }}>
+        
+        {/* ── NEW: Snapshot Header (Only visible during screenshot!) ── */}
+        {isDownloading && (
+          <div className={styles.snapshotHeader}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="12" fill="#FF0000"/>
+              <circle cx="12" cy="12" r="4.5" fill="white"/>
+              <circle cx="12" cy="12" r="2" fill="#FF0000"/>
+            </svg>
+            <h2 className={styles.snapshotTitle}>{monthLabel} Unwrapped</h2>
+          </div>
+        )}
+
+        {/* ── 1. Immersive Story Hero ── */}
+        <div className={styles.storySection}>
+          {/* Playtime Poster */}
+          <div className={styles.storyCard}>
+            <div className={styles.storyGlow} />
+            <p className={styles.storyPreTitle}>Total Playtime</p>
+            <h2 className={styles.storyMassiveStat}>
+              {Math.round(total_minutes).toLocaleString()}
+              <span className={styles.storyUnit}>mins</span>
+            </h2>
+            <p className={styles.storySubTitle}>That's <strong>{hrs}h {mins}m</strong> of pure vibes.</p>
+          </div>
+
+          {/* Streak Poster */}
+          <div className={styles.storyCard}>
+            <p className={styles.storyPreTitle}>Biggest Obsession</p>
             {streak ? (
-              <div className={styles.streakContent}>
-                <div className={styles.streakNum}>
-                  <span className={styles.streakDays}>{streak.days}</span>
-                  <span className={styles.streakLabel}>days</span>
-                </div>
-                <div className={styles.streakInfo}>
-                  <p className={styles.streakArtist}>{streak.artist}</p>
-                  <p className={styles.streakDates}>{streak.start} → {streak.end}</p>
-                  <p className={styles.streakDesc}>Consecutive days listening to your #1 artist</p>
-                </div>
-              </div>
-            ) : <p className={styles.empty}>Not enough data</p>}
-          </div>
-        </div>
-
-        <div className={styles.card}>
-          <div className={styles.cardHeader}>
-            <span className={styles.cardIcon}>📼</span>
-            <span className={styles.cardTitle}>The Throwback</span>
-          </div>
-          <div className={styles.cardBody}>
-            {throwback ? (
-              <div className={styles.throwbackContent}>
-                <div className={styles.throwbackSong}>
-                  <span className={styles.throwbackArrow}>↩</span>
-                  <div>
-                    <p className={styles.throwbackTitle}>{throwback.song}</p>
-                    <p className={styles.throwbackArtist}>{throwback.artist}</p>
-                  </div>
-                </div>
-                <div className={styles.throwbackStats}>
-                  <div className={styles.tbStat}>
-                    <span className={styles.tbVal}>{throwback.plays_then}</span>
-                    <span className={styles.tbMeta}>3 months ago</span>
-                  </div>
-                  <span className={styles.tbArrow}>→</span>
-                  <div className={styles.tbStat}>
-                    <span className={styles.tbVal}>{throwback.plays_now}</span>
-                    <span className={styles.tbMeta}>this month</span>
-                  </div>
-                </div>
-              </div>
+              <>
+                <h2 className={styles.storyMassiveStat}>{streak.days}<span className={styles.storyUnit}>days</span></h2>
+                <p className={styles.storySubTitle}>
+                  straight listening to 
+                  <strong style={{ display: 'block', marginTop: '6px', lineHeight: '1.2' }}>
+                    {streak.artist}
+                  </strong>
+                </p>
+              </>
             ) : (
-              <p className={styles.empty}>Not enough history yet — check back in 3 months.</p>
+              <p className={styles.empty}>Keep listening to build a streak!</p>
             )}
           </div>
+
+          {/* Discovery Poster (Full Width) */}
+        <div className={styles.storyCard}>
+          <p className={styles.storyPreTitle}>Your Discovery</p>
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: '8%', flexWrap: 'wrap', zIndex: 1, width: '100%', marginTop: '8px' }}>
+            
+            <div style={{ flex: 1, textAlign: 'right' }}>
+              <h2 className={styles.storyMassiveStat} style={{ fontSize: 'clamp(36px, 6vw, 64px)', marginBottom: '4px' }}>
+                {uniqueArtistsCount.toLocaleString()}
+              </h2>
+              <p className={styles.storySubTitle}>Unique Artists</p>
+            </div>
+
+            {/* Vertical Divider */}
+            <div style={{ width: '2px', height: '60px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px' }} />
+
+            <div style={{ flex: 1, textAlign: 'left' }}>
+              <h2 className={styles.storyMassiveStat} style={{ fontSize: 'clamp(36px, 6vw, 64px)', marginBottom: '4px' }}>
+                {uniqueSongsCount.toLocaleString()}
+              </h2>
+              <p className={styles.storySubTitle}>Unique Songs</p>
+            </div>
+
+          </div>
         </div>
+        </div>
+
+        {/* ── 2. Top Boards (User Toggleable 5 or 10) ── */}
+        <div className={styles.rankingsSection}>
+          <div className={styles.historyHeader}>
+            <div className={styles.sectionLabel}>Your Top {showTop10 ? '10' : '5'}</div>
+            <button 
+              className={styles.showMore} 
+              style={{ padding: '6px 16px', fontSize: '11px', marginTop: '-4px' }} 
+              onClick={() => setShowTop10(!showTop10)}
+            >
+              {showTop10 ? 'View Top 5' : 'View Top 10'}
+            </button>
+          </div>
+          <div className={styles.rankingsGrid}>
+            <TopRankings 
+              top_artists={top_artists?.slice(0, showTop10 ? 10 : 5)} 
+              top_songs={top_songs?.slice(0, showTop10 ? 10 : 5)} 
+              top_albums={top_albums?.slice(0, showTop10 ? 10 : 5)} 
+              top_music_directors={top_music_directors?.slice(0, showTop10 ? 10 : 5)}
+              maxArtist={maxArtist} 
+              maxSong={maxSong} 
+              maxDirector={maxDirector}
+              setArtistDetail={setArtistDetail} 
+            />
+          </div>
+        </div>
+
+        {/* ── 3. Patterns ── */}
+        <TimeBreakdown weekly={weekly_breakdown} dow={day_of_week} hours={hour_heatmap} />
+
+      </div> {/* End of snapshot reference */}
+
+      {/* ── Share / Download Button ── */}
+      <div className={styles.shareActionContainer}>
+        <button 
+          className={styles.shareBtn} 
+          onClick={handleDownload} 
+          disabled={isDownloading}
+        >
+          {isDownloading ? (
+            <span className={styles.shareLoading}>Capturing Magic...</span>
+          ) : (
+            <>
+              {/* Using a standard 'Share' icon instead of a 'Download' icon */}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+              </svg>
+              Share Unwrapped Snapshot
+            </>
+          )}
+        </button>
       </div>
 
-      {/* ── 2. Top Boards (2x2 Grid) ── */}
-      <div className={styles.rankingsSection}>
-        <div className={styles.sectionLabel}>Your Top Boards</div>
-        <div className={styles.rankingsGrid}>
-          <TopRankings 
-            top_artists={top_artists} 
-            top_songs={top_songs} 
-            top_albums={top_albums} 
-            top_music_directors={top_music_directors}
-            maxArtist={maxArtist} 
-            maxSong={maxSong} 
-            maxDirector={maxDirector}
-            setArtistDetail={setArtistDetail} 
-          />
-        </div>
+      {/* ── 4. Full History (RESTORED!) ── */}
+      <div style={{ marginTop: '32px' }}>
+        <HistorySection history={history} />
       </div>
-
-      {/* ── 3. Patterns ── */}
-      <TimeBreakdown weekly={weekly_breakdown} dow={day_of_week} hours={hour_heatmap} />
-
-      {/* ── 4. Full History ── */}
-      <HistorySection history={history} />
 
       {/* ── Artist detail drawer ── */}
       {artistDetail && (
@@ -326,5 +489,6 @@ export default function MonthCapsule({ data }) {
       )}
 
     </div>
+    </>
   )
 }

@@ -2,11 +2,12 @@
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(8, 8, 8, 0.85);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-bottom: 1px solid var(--border-subtle);
-  height: 58px;
+  /* Make the background more transparent to let the red orbs shine through */
+  background: rgba(5, 5, 5, 0.4); 
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  height: 64px; /* Slightly taller for a more modern feel */
 }
 
 .inner {
@@ -22,7 +23,7 @@
 .brand {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   background: none;
   border: none;
   cursor: pointer;
@@ -34,14 +35,40 @@
 .brandText {
   display: flex;
   align-items: baseline;
-  gap: 0;
-  font-size: 17px;
-  font-weight: 600;
+  gap: 6px; /* Adds the missing space between YT Music and Un-Wrapped */
+  font-size: 18px;
   letter-spacing: -0.4px;
 }
 
-.brandYT { color: var(--yt-red); font-weight: 800; }
-.brandStats { color: var(--text-primary); font-weight: 300; opacity: 0.9; }
+.brandYT { 
+  color: var(--yt-red); 
+  font-weight: 800; 
+}
+
+/* ── Shimmering Text Animation ── */
+.brandUnwrapped { 
+  font-weight: 800;
+  /* The animated gradient */
+  background: linear-gradient(
+    to right,
+    #ffffff 20%,
+    #ffb3b3 40%,
+    #ff3333 60%,
+    #ffffff 80%
+  );
+  background-size: 200% auto;
+  color: #fff;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shine 4s linear infinite;
+}
+
+@keyframes shine {
+  to {
+    background-position: 200% center;
+  }
+}
 
 .right {
   display: flex;
@@ -79,9 +106,62 @@
   padding: 7px 16px;
   transition: all var(--transition);
   letter-spacing: -0.1px;
+  white-space: nowrap; /* Prevents "Add Data" and "Clear All" from splitting */
 }
+
 .resetBtn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   border-color: var(--border-strong);
+}
+
+/* ── Navbar Responsive ── */
+@media (max-width: 640px) {
+  .inner {
+    padding: 0 12px; /* Pulls the navbar closer to the screen edges */
+  }
+  
+  .brand {
+    gap: 8px; /* Slightly tighter logo gap */
+  }
+  
+  .brandText {
+    font-size: 14px; /* Shrinks the title to fit */
+    gap: 4px;
+    white-space: nowrap; /* Prevents "YT Music" and "Unwrapped" from breaking */
+  }
+  
+  .fileName {
+    display: none; 
+  }
+  
+  .right {
+    gap: 6px; /* Brings the Add Data and Clear All buttons closer together */
+  }
+  
+  .resetBtn {
+    padding: 6px 10px; /* Thinner button padding */
+    font-size: 11px;   /* Smaller button text */
+    gap: 4px;          /* Closer icon to text */
+  }
+}
+
+@media (max-width: 380px) {
+  /* On ultra-narrow screens (like iPhone SE), just shrink further instead of stacking */
+  .brandText {
+    font-size: 12px;
+    flex-direction: row; 
+    align-items: baseline;
+  }
+  
+  .resetBtn {
+    padding: 6px 8px;
+    font-size: 10px;
+    gap: 3px;
+  }
+  
+  .resetBtn svg {
+    width: 12px;
+    height: 12px;
+  }
 }

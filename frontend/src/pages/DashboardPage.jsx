@@ -9,6 +9,18 @@ export default function DashboardPage({ data }) {
   const { months_available, monthly_stats, summary } = data
 
   const [selectedMonth, setSelectedMonth] = useState(() => months_available[months_available.length - 1])
+  
+  // --- ADD THESE NEW LINES ---
+  const [viewYear, setViewYear] = useState(() => months_available[months_available.length - 1].split('-')[0])
+
+  const availableYears = useMemo(() => {
+    const years = new Set(months_available.map(m => m.split('-')[0]))
+    return Array.from(years).sort((a, b) => b - a) // Show newest years first
+  }, [months_available])
+
+  const monthsForViewYear = useMemo(() => {
+    return months_available.filter(m => m.startsWith(viewYear))
+  }, [months_available, viewYear])
 
   const capsuleData = useMemo(() => {
     return monthly_stats[selectedMonth] || null
@@ -18,35 +30,33 @@ export default function DashboardPage({ data }) {
 
   return (
     <div className={styles.page}>
-      {/* Summary strip */}
-      <div className={styles.summaryStrip}>
-        <div className={styles.summaryItem}>
-          <span className={styles.summaryVal}>{summary.total_plays.toLocaleString()}</span>
-          <span className={styles.summaryLabel}>Total Plays</span>
-        </div>
-        <div className={styles.summaryDivider} />
-        <div className={styles.summaryItem}>
-          <span className={styles.summaryVal}>{months_available.length}</span>
-          <span className={styles.summaryLabel}>Months of Data</span>
-        </div>
-        <div className={styles.summaryDivider} />
-        <div className={styles.summaryItem}>
-          <span className={styles.summaryVal}>{summary.unique_artists.toLocaleString()}</span>
-          <span className={styles.summaryLabel}>Unique Artists</span>
-        </div>
-        <div className={styles.summaryDivider} />
-        <div className={styles.summaryItem}>
-          <span className={styles.summaryVal}>{summary.unique_songs.toLocaleString()}</span>
-          <span className={styles.summaryLabel}>Unique Songs</span>
-        </div>
+      {/* Lifetime Hero */}
+      <div className={styles.lifetimeHero}>
+        <h1 className={styles.lifetimeHeadline}>
+          Across <span className={styles.highlight}>{months_available.length}</span> {months_available.length === 1 ? 'month' : 'months'}, you've played <span className={styles.highlight}>{summary.total_plays.toLocaleString()}</span> tracks.
+        </h1>
+        <p className={styles.lifetimeSub}>
+          Discovering <span className={styles.highlightSub}>{summary.unique_artists.toLocaleString()}</span> artists and <span className={styles.highlightSub}>{summary.unique_songs.toLocaleString()}</span> unique songs along the way.
+        </p>
       </div>
 
-      {/* Month picker */}
+      {/* ── Timeline Explorer ── */}
       <div className={styles.monthSection}>
-        <p className={styles.monthLabel}>Select a month</p>
+        <div className={styles.yearScroller}>
+          {availableYears.map(year => (
+            <button
+              key={year}
+              className={`${styles.yearChip} ${year === viewYear ? styles.yearChipActive : ''}`}
+              onClick={() => setViewYear(year)}
+            >
+              {year}
+            </button>
+          ))}
+        </div>
+
         <div className={styles.monthGrid}>
-          {months_available.map(m => {
-            const [y, mo] = m.split('-').map(Number)
+          {monthsForViewYear.map(m => {
+            const [, mo] = m.split('-').map(Number)
             const isSelected = m === selectedMonth
             return (
               <button
@@ -54,8 +64,7 @@ export default function DashboardPage({ data }) {
                 className={`${styles.monthChip} ${isSelected ? styles.monthChipActive : ''}`}
                 onClick={() => setSelectedMonth(m)}
               >
-                <span className={styles.chipMonth}>{MONTH_NAMES[mo - 1]}</span>
-                <span className={styles.chipYear}>{y}</span>
+                {MONTH_NAMES[mo - 1]}
               </button>
             )
           })}
@@ -72,7 +81,10 @@ export default function DashboardPage({ data }) {
             </h2>
             <div className={styles.capsuleBadge}>Monthly Capsule</div>
           </div>
-          <MonthCapsule data={capsuleData} />
+          <MonthCapsule 
+            data={capsuleData} 
+            monthLabel={`${FULL_MONTH_NAMES[month - 1]} ${year}`} 
+          />
         </div>
       )}
     </div>

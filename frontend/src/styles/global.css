@@ -9,10 +9,10 @@
   --bg-primary: #080808;
   --bg-secondary: #0f0f0f;
   --bg-elevated: #161616;
-  --bg-card: #141414;
+  --bg-card: rgba(255, 255, 255, 0.02);
   --bg-card-hover: #1a1a1a;
   --bg-hover: #1e1e1e;
-  --border-subtle: rgba(255,255,255,0.06);
+  --border-subtle: rgba(255, 255, 255, 0.04);
   --border-strong: rgba(255,255,255,0.12);
   --border-red: rgba(255, 0, 0, 0.25);
   --text-primary: #f9f9f9;
@@ -44,14 +44,53 @@ html { scroll-behavior: smooth; }
 
 body {
   font-family: var(--font-main);
-  background-color: var(--bg-primary);
+  background-color: #050505; /* Just slightly off pure black for depth */
   color: var(--text-primary);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-image: 
-    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255,0,0,0.06) 0%, transparent 60%);
-  background-attachment: fixed;
+  position: relative;
+  overflow-x: hidden; /* Keep the orbs from causing horizontal scroll */
+}
+
+/* ── Ambient Animated Background ── */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px); /* This is what makes it look like a glowing aura instead of a ball */
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.45;
+}
+
+body::before {
+  width: 50vw;
+  height: 50vh;
+  background: radial-gradient(circle, var(--yt-red) 0%, transparent 70%);
+  top: -10%;
+  left: -10%;
+  animation: driftOne 20s ease-in-out infinite alternate;
+}
+
+body::after {
+  width: 45vw;
+  height: 45vh;
+  background: radial-gradient(circle, #ff3333 0%, transparent 70%);
+  bottom: -10%;
+  right: -10%;
+  animation: driftTwo 25s ease-in-out infinite alternate;
+}
+
+@keyframes driftOne {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(25vw, 15vh) scale(1.2); }
+}
+
+@keyframes driftTwo {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-20vw, -20vh) scale(1.1); }
 }
 
 /* Scrollbar */

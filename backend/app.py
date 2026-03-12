@@ -214,7 +214,18 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
         # 2. If it's a Last.fm record, fallback to a text Search
         if not best_match:
             search_query = f"{clean_title} {channel_artist}".strip() if not is_junk(channel_artist) else clean_title
+            
+            # Attempt 1: Strict "songs" search
             results = ytmusic.search(search_query, filter="songs", limit=1)
+            
+            # Attempt 2: If that fails, it might be classified as a "video" (common for some tracks)
+            if not results:
+                results = ytmusic.search(search_query, filter="videos", limit=1)
+                
+            # Attempt 3: If STILL failing, drop the artist name and just search the title
+            if not results and channel_artist:
+                results = ytmusic.search(clean_title, filter="songs", limit=1)
+
             if results:
                 best_match = results[0]
 
@@ -337,7 +348,7 @@ def enrich_artists(records: list) -> None:
     PROGRESS["total"] = len(uncached)
     PROGRESS["processed"] = 0
     if len(uncached) > 0:
-        PROGRESS["message"] = "Fetching metadata from YT Music/Last.fm..."
+        PROGRESS["message"] = "Finding album art & high-res details..."
     
     app.logger.info(f"Enriching {len(uncached)} new titles ({len(ARTIST_CACHE)} already cached)")
 
@@ -350,7 +361,7 @@ def enrich_artists(records: list) -> None:
     if uncached:
         save_cache()
 
-    PROGRESS["message"] = "Processing complete!"
+    PROGRESS["message"] = "Wrapping things up..."
 
     for r in records:
         meta = ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})
@@ -509,7 +520,9 @@ def compute_top_songs_by_plays(records, durations):
             
             song_plays[key] += 1
             if key not in song_meta:
-                song_meta[key] = {"name": title, "artist": r["artist"], "video_id": r["video_id"]}
+                # Join all the featured artists back together with a comma!
+                full_artist_string = ", ".join(r.get("artists", [r["artist"]]))
+                song_meta[key] = {"name": title, "artist": full_artist_string, "video_id": r["video_id"]}
                 
     sorted_s = sorted(song_plays.items(), key=lambda x: x[1], reverse=True)
     return [{"name": song_meta[k]["name"], "artist": song_meta[k]["artist"], "plays": p, "video_id": song_meta[k]["video_id"]}
@@ -645,7 +658,7 @@ def get_progress():
 def analyze():
     try:
         global PROGRESS
-        PROGRESS["message"] = "Merging history and fetching metadata..."
+        PROGRESS["message"] = "Unwrapping your listening history..."
         PROGRESS["processed"] = 0
         PROGRESS["total"] = 0
         
@@ -674,8 +687,7 @@ def analyze():
         lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts) if lastfm_username else []
         print(lfm_records)
         # 5. Merge Last.fm scrobbles
-        records = merge_records(merged_records, lfm_records)
-        
+        records = merge_records(lfm_records, merged_records)
         if not records:
             return jsonify({"error": "No valid entries found from Takeout or History."}), 400
 

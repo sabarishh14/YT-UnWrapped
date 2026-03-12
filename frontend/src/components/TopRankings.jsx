@@ -12,36 +12,63 @@ export default function TopRankings({ top_artists, top_songs, top_albums, top_mu
     return `${h}h ${m}m`
   }
 
-  // Reusable Ranked List Component
-  const RankedList = ({ items, valueKey, valueFormatter, maxValue, onClickName }) => (
-    <ol className={styles.rankedList}>
-      {items.map((item, i) => {
-        const value = item[valueKey]
-        const pct = maxValue ? (value / maxValue) * 100 : 0
-        return (
-          <li key={i} className={styles.rankItem}>
-            <span className={`${styles.rankNum} ${i === 0 ? styles.rankGold : i < 3 ? styles.rankSilver : ''}`}>
-              {i + 1}
+  // Reusable Ranked List Component (Wrapped Style)
+  const RankedList = ({ items, valueKey, valueFormatter, maxValue, onClickName }) => {
+    if (!items || items.length === 0) return null;
+
+    const topItem = items[0];
+    const restItems = items.slice(1);
+
+    return (
+      <div className={styles.rankedContainer}>
+        {/* ── #1 Spotlight ── */}
+        <div className={styles.rankHero}>
+          <div className={styles.rankHeroCrown}>#1</div>
+          <div className={styles.rankHeroInfo}>
+            <span
+              className={`${styles.rankHeroName} ${onClickName ? styles.rankNameClickable : ''}`}
+              onClick={() => onClickName && onClickName(topItem.name)}
+            >
+              {topItem.name}
             </span>
-            <div className={styles.rankInfo}>
-              <div className={styles.rankNameRow}>
-                <span
-                  className={`${styles.rankName} ${onClickName ? styles.rankNameClickable : ''}`}
-                  onClick={() => onClickName && onClickName(item.name)}
-                >
-                  {item.name}
-                </span>
-                <span className={styles.rankValue}>{valueFormatter(value)}</span>
-              </div>
-              <div className={styles.rankBar}>
-                <div className={styles.rankFill} style={{ width: `${pct}%`, opacity: 0.9 - i * 0.06 }} />
-              </div>
-            </div>
-          </li>
-        )
-      })}
-    </ol>
-  )
+            <span className={styles.rankHeroValue}>{valueFormatter(topItem[valueKey])}</span>
+          </div>
+        </div>
+
+        {/* ── Runners up (2-N) ── */}
+        {restItems.length > 0 && (
+          <ol className={styles.rankedList} start="2">
+            {restItems.map((item, i) => {
+              const actualRank = i + 2; // Because we sliced off the first item
+              const value = item[valueKey];
+              const pct = maxValue ? (value / maxValue) * 100 : 0;
+              return (
+                <li key={i} className={styles.rankItem}>
+                  <span className={`${styles.rankNum} ${actualRank <= 3 ? styles.rankSilver : ''}`}>
+                    {actualRank}
+                  </span>
+                  <div className={styles.rankInfo}>
+                    <div className={styles.rankNameRow}>
+                      <span
+                        className={`${styles.rankName} ${onClickName ? styles.rankNameClickable : ''}`}
+                        onClick={() => onClickName && onClickName(item.name)}
+                      >
+                        {item.name}
+                      </span>
+                      <span className={styles.rankValue}>{valueFormatter(value)}</span>
+                    </div>
+                    <div className={styles.rankBar}>
+                      <div className={styles.rankFill} style={{ width: `${pct}%`, opacity: 0.9 - actualRank * 0.08 }} />
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
+    );
+  };
 
   return (
     <>

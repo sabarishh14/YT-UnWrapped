@@ -366,3 +366,93 @@
   border-radius: 4px;
   color: var(--text-primary);
 }
+
+/* ── Cinematic Loading Screen ── */
+.cinematicWrapper {
+  position: fixed;
+  inset: 0;
+  z-index: 9999; /* Overrides the navbar and everything else */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #030303; 
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  animation: fadeIn 0.8s ease forwards;
+  overflow: hidden;
+}
+
+.ambientOrb {
+  position: absolute;
+  width: 70vw;
+  height: 70vh;
+  background: radial-gradient(circle, rgba(255, 0, 0, 0.2) 0%, transparent 65%);
+  filter: blur(90px);
+  animation: pulseOrb 4s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes pulseOrb {
+  0% { transform: scale(0.8) translateY(5%); opacity: 0.6; }
+  100% { transform: scale(1.2) translateY(-5%); opacity: 1; }
+}
+
+.cinematicContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 36px;
+}
+
+.logoRingCinematic {
+  animation: floatCinematic 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 30px rgba(255, 0, 0, 0.3));
+}
+
+@keyframes floatCinematic {
+  0%, 100% { transform: translateY(0) scale(1); filter: drop-shadow(0 0 30px rgba(255, 0, 0, 0.3)); }
+  50% { transform: translateY(-12px) scale(1.05); filter: drop-shadow(0 0 50px rgba(255, 0, 0, 0.6)); }
+}
+
+.cinematicText {
+  font-size: clamp(32px, 6vw, 48px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  background: linear-gradient(90deg, #ffffff 20%, #ffb3b3 40%, #ff3333 60%, #ffffff 80%);
+  background-size: 200% auto;
+  color: white;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shine 3s linear infinite;
+  padding: 0 10px;
+}
+
+.cinematicSubtext {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progressLine {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  color: var(--text-secondary);
+  letter-spacing: 1.5px;
+}
+
+.etaLine {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--yt-red);
+  letter-spacing: -0.5px;
+  text-shadow: 0 0 20px rgba(255, 0, 0, 0.4);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

@@ -6,9 +6,12 @@
 }
 
 /* ── Base Card ── */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
+/* Replace .card and .patternCard with this glassmorphic style */
+.card, .patternCard {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border-radius: var(--radius-2xl);
   padding: 24px 28px;
   display: flex;
@@ -16,14 +19,15 @@
   gap: 16px;
   position: relative;
   overflow: hidden;
-  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: all var(--transition);
 }
 
-.card:hover {
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-card);
+.card:hover, .patternCard:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: translateY(-2px);
 }
+
 
 .cardHeader {
   display: flex;
@@ -59,20 +63,6 @@
 .empty { font-size: 13px; color: var(--text-muted); font-style: italic; }
 
 /* ── Hero Row ── */
-.heroRow {
-  display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
-  gap: 16px;
-  align-items: stretch;
-}
-
-/* ── Playtime Card ── */
-.playtimeCard {
-  justify-content: space-between;
-  background: var(--bg-card);
-  position: relative;
-  overflow: hidden;
-}
 
 .playtimeCard::after {
   content: '';
@@ -131,12 +121,6 @@
   letter-spacing: 0.1px;
 }
 
-/* ── Streak Card ── */
-.streakContent {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
 
 .streakNum {
   display: flex;
@@ -161,7 +145,6 @@
 .streakDesc { font-size: 11px; color: var(--text-muted); line-height: 1.5; margin-top: 4px; }
 
 /* ── Throwback Card ── */
-.throwbackContent { display: flex; flex-direction: column; gap: 16px; }
 .throwbackSong { display: flex; gap: 12px; align-items: flex-start; }
 .throwbackArrow { font-size: 22px; color: var(--yt-red); flex-shrink: 0; line-height: 1.2; }
 .throwbackTitle { font-size: 15px; font-weight: 600; color: var(--text-primary); line-height: 1.3; letter-spacing: -0.2px; }
@@ -315,20 +298,6 @@
   gap: 16px;
 }
 
-.patternCard {
-  background: var(--bg-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-2xl);
-  padding: 22px 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  transition: border-color var(--transition);
-}
-
-.patternCard:hover {
-  border-color: var(--border-strong);
-}
 
 .patternTitle {
   font-size: 12px;
@@ -377,11 +346,12 @@
   white-space: nowrap;
 }
 
+/* ── Week Chart ── */
 .weekTrack {
   flex: 1;
   width: 100%;
   background: rgba(255,255,255,0.04);
-  border-radius: 5px 5px 0 0;
+  border-radius: 8px; /* Rounder tracks */
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -389,10 +359,11 @@
 
 .weekFill {
   width: 100%;
-  background: linear-gradient(to top, var(--yt-red) 0%, rgba(255,80,80,0.6) 100%);
-  border-radius: 5px 5px 0 0;
+  background: linear-gradient(to top, var(--yt-red) 0%, #ff6666 100%);
+  border-radius: 8px; /* Rounder fills */
   transition: height 0.8s cubic-bezier(0.4,0,0.2,1);
   min-height: 4px;
+  box-shadow: 0 0 12px rgba(255, 0, 0, 0.3); /* Glow effect */
 }
 
 .weekLabel {
@@ -420,19 +391,21 @@
   flex-shrink: 0;
 }
 
+/* ── Day of Week Chart ── */
 .dowTrack {
   flex: 1;
-  height: 6px;
+  height: 8px; /* Slightly thicker */
   background: rgba(255,255,255,0.04);
-  border-radius: 3px;
+  border-radius: 8px;
   overflow: hidden;
 }
 
 .dowFill {
   height: 100%;
-  background: linear-gradient(90deg, var(--yt-red), rgba(255,80,80,0.7));
-  border-radius: 3px;
+  background: linear-gradient(90deg, var(--yt-red), #ff6666);
+  border-radius: 8px;
   transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+  box-shadow: 0 0 12px rgba(255, 0, 0, 0.3); /* Glow effect */
 }
 
 .dowVal {
@@ -774,26 +747,514 @@
   font-weight: 600;
 }
 
+/* ── Share Action Button ── */
+.shareActionContainer {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  animation: slideUpFade 1.2s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+.shareBtn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, var(--yt-red) 0%, #ff3333 100%);
+  color: white;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  padding: 16px 32px;
+  border-radius: 100px;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(255, 0, 0, 0.3);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.shareBtn:hover:not(:disabled) {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 15px 40px rgba(255, 0, 0, 0.45);
+}
+
+.shareBtn:active:not(:disabled) {
+  transform: translateY(2px) scale(0.98);
+}
+
+.shareBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  background: #333;
+  box-shadow: none;
+}
+
+.shareLoading {
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 /* ── Responsive ── */
 @media (max-width: 1024px) {
-  .heroRow { grid-template-columns: 1fr 1fr; }
-  .playtimeCard { grid-column: 1 / -1; }
+  /* Removed the storySection rules from here so it STAYS 3 columns on laptops! */
   .patternsGrid { grid-template-columns: 1fr 1fr; }
   .rankingsGrid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 768px) {
-  .heroRow { grid-template-columns: 1fr; }
-  .patternsGrid { grid-template-columns: 1fr; }
+  /* 1. Fix the Story Hero Cards (Stack tightly) */
+  /* 1. Fix the Story Hero Cards (Keep 2 columns on mobile) */
+  .storySection {
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  
+  .storyCard {
+    padding: 16px 12px; /* Reduced vertical padding so it matches the other cards! */
+    border-radius: 20px;
+  }
+  
+  .storyMassiveStat {
+    font-size: clamp(28px, 7vw, 40px); /* Shrink text slightly for mobile 2-column */
+  }
+
+  .storySubTitle {
+    font-size: 13px; /* Smaller subtitle for mobile */
+  }
+  
+  .rankingsGrid, .patternsGrid {
+    display: flex; 
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory; 
+    gap: 16px;
+    padding-bottom: 16px; 
+    
+    margin-left: -5vw;
+    margin-right: -5vw;
+    padding-left: 5vw;
+    padding-right: 5vw;
+    
+    /* Remove the mask-image stuff completely */
+    -webkit-overflow-scrolling: touch; /* Helps mobile interpret it as scrollable */
+  }
+  
+  /* ── Custom Glowing Mobile Scrollbar (Forced) ── */
+  .rankingsGrid::-webkit-scrollbar,
+  .patternsGrid::-webkit-scrollbar {
+    display: block !important; 
+    height: 8px !important;
+    -webkit-appearance: none !important;
+  }
+
+  .rankingsGrid::-webkit-scrollbar-track,
+  .patternsGrid::-webkit-scrollbar-track {
+    /* Make the track completely invisible so there is no ugly grey background pill */
+    background: transparent !important; 
+    margin: 0 5vw !important; 
+  }
+
+  .rankingsGrid::-webkit-scrollbar-thumb,
+  .patternsGrid::-webkit-scrollbar-thumb {
+    background-color: var(--yt-red) !important; 
+    border-radius: 20px !important;
+    /* Removed the black border since the track is now invisible */
+  }
+
+  /* Make each card take up 85% of the screen so they hint at the next swipeable card */
+  .rankingsGrid > div, 
+  .patternsGrid > div {
+    width: 85vw;        /* Lock the width */
+    max-width: 85vw;    /* Prevent flexbox from stretching it for long text */
+    flex-shrink: 0;
+    scroll-snap-align: center;
+  }
+  
+  /* 3. History Table Mobile Cleanup */
   .historyHead,
-  .historyRow { grid-template-columns: 36px 1fr; }
+  .historyRow { 
+    grid-template-columns: 36px 1fr; 
+    padding: 12px 16px;
+  }
   .historyHead span:nth-child(3),
   .historyHead span:nth-child(4),
   .historyArtist,
   .historyAlbum { display: none; }
+
+  /* ── Mobile UI Hint (Tells users to swipe!) ── */
+  .sectionLabel::after {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 500;
+    margin-left: 8px;
+    letter-spacing: 0;
+  }
+
+  /* ── Snapshot Mode Overrides ── */
+  /* When taking a screenshot on a phone, bypass the swipe container and stack everything vertically to capture all data! */
+  .snapshotMode .rankingsGrid,
+  .snapshotMode .patternsGrid {
+    display: grid !important;
+    grid-template-columns: 1fr !important; 
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 16px !important;
+  }
+
+  .snapshotMode .rankingsGrid > div,
+  .snapshotMode .patternsGrid > div {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+  
+  /* Hide the swipe hint from the final downloaded image */
+  .snapshotMode .sectionLabel::after {
+    display: none !important;
+  }
 }
 
 @media (max-width: 480px) {
-  .playtimeMins { font-size: 44px; }
+  .playtimeMins, .storyMassiveStat { font-size: 40px; }
   .drawer { width: 100vw; }
+}
+
+/* ── STORY SECTION (2x2 Bento Layout) ── */
+.storySection {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* 2 equal columns */
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+/* Force the 3rd card to span across both columns */
+.storySection > div:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.storyCard {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 28px;
+  /* Reduced baseline padding, will shrink more on mobile */
+  padding: 32px 24px; 
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  transition: transform var(--transition);
+}
+
+.storyCard:hover {
+  transform: translateY(-4px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.storyGlow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle, rgba(255,0,0,0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.storyPreTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+  z-index: 1;
+}
+
+.storyMassiveStat {
+  /* Using clamp: minimum 36px (mobile), scales with viewport, max 64px (desktop) */
+  font-size: clamp(36px, 6vw, 64px); 
+  font-weight: 800;
+  letter-spacing: -2px;
+  color: white;
+  line-height: 1;
+  margin-bottom: 8px;
+  z-index: 1;
+}
+
+.storyUnit {
+  font-size: clamp(16px, 3vw, 20px);
+  font-weight: 500;
+  color: var(--yt-red);
+  letter-spacing: -1px;
+  margin-left: 8px;
+}
+
+.storySubTitle {
+  font-size: 16px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  z-index: 1;
+}
+
+.storySubTitle strong { color: white; font-weight: 600; }
+
+.storyTitleGlow {
+  font-size: 28px;
+  font-weight: 800;
+  color: white;
+  line-height: 1.2;
+  margin-bottom: 8px;
+  background: linear-gradient(90deg, #fff, #ffb3b3);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  z-index: 1;
+}
+
+.storyTimeline {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  background: rgba(0,0,0,0.4);
+  padding: 12px 20px;
+  border-radius: 12px;
+  z-index: 1;
+}
+
+.storyHighlight { color: var(--yt-red); font-weight: 700; }
+
+/* ── RANKINGS HERO (#1 SPOTLIGHT) ── */
+.rankedContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.rankHero {
+  background: linear-gradient(135deg, rgba(255, 0, 0, 0.15) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 0, 0, 0.2);
+  border-radius: 16px;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.rankHero::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; width: 80px; height: 80px;
+  background: radial-gradient(circle top right, rgba(255,0,0,0.2), transparent);
+  pointer-events: none;
+}
+
+.rankHeroCrown {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--yt-red);
+  letter-spacing: 1px;
+}
+
+.rankHeroInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 1;
+}
+
+.rankHeroName {
+  font-size: 24px;
+  font-weight: 800;
+  color: white;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
+  
+  /* Force truncation for long song/album names */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rankHeroValue {
+  font-size: 14px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* ── SMOOTH ENTRANCE ANIMATIONS ── */
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.storyCard, .card, .patternCard, .historyTable {
+  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+
+/* Stagger the animations so they load in a wave */
+.storySection > div:nth-child(1) { animation-delay: 0.1s; }
+.storySection > div:nth-child(2) { animation-delay: 0.2s; }
+.storySection > div:nth-child(3) { animation-delay: 0.3s; }
+.rankingsGrid > div:nth-child(1) { animation-delay: 0.4s; }
+.rankingsGrid > div:nth-child(2) { animation-delay: 0.5s; }
+.rankingsGrid > div:nth-child(3) { animation-delay: 0.6s; }
+.rankingsGrid > div:nth-child(4) { animation-delay: 0.7s; }
+.patternsGrid > div:nth-child(1) { animation-delay: 0.8s; }
+.patternsGrid > div:nth-child(2) { animation-delay: 0.9s; }
+.patternsGrid > div:nth-child(3) { animation-delay: 1.0s; }
+
+/* ── Snapshot Header ── */
+.snapshotHeader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.snapshotTitle {
+  font-size: 24px;
+  font-weight: 800;
+  color: white;
+  letter-spacing: -0.5px;
+  background: linear-gradient(90deg, #ffffff, #ffb3b3);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ── HIDDEN EXPORT POSTER (9:16) ── */
+.exportPosterWrapper {
+  position: absolute;
+  top: -9999px; /* Hide it way off screen */
+  left: -9999px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.exportPoster {
+  width: 1080px;
+  height: 1920px;
+  background: #050505;
+  padding: 80px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.posterHeader {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 80px;
+}
+
+.posterTitle {
+  font-size: 56px;
+  font-weight: 800;
+  color: white;
+}
+
+.posterHero {
+  margin-bottom: 50px; /* Reduced from 80px */
+}
+
+.posterGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 30px; /* Reduced from 40px */
+  flex: 1;
+}
+
+.posterCard {
+  background: rgba(255, 255, 255, 0.03);
+  border: 2px solid rgba(255, 255, 255, 0.05);
+  border-radius: 40px;
+  padding: 32px 40px; /* Reduced vertical padding */
+}
+
+.posterCardTitle {
+  font-size: 40px;
+  color: #ff3333;
+  margin-bottom: 30px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+/* --- NEW: Dashboard-style Hero Card for Poster --- */
+.posterHeroCard {
+  background: linear-gradient(135deg, rgba(255, 0, 0, 0.15) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 2px solid rgba(255, 0, 0, 0.3);
+  border-radius: 24px;
+  padding: 20px 28px; /* Tighter inner padding */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 20px; /* Reduced margin */
+}
+
+.posterHeroCrown {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--yt-red);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.posterHeroName {
+  font-size: 48px;
+  font-weight: 800;
+  color: white;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.posterRow {
+  display: flex;
+  align-items: center;
+  gap: 30px;
+  margin-bottom: 16px; /* Reduced from 20px */
+}
+
+.posterNum {
+  font-size: 32px;
+  font-weight: 800;
+  color: #666;
+  width: 40px;
+}
+
+.posterName {
+  font-size: 36px;
+  font-weight: 700;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.posterFooter {
+  text-align: center;
+  font-size: 32px;
+  font-weight: 600;
+  color: #444;
+  margin-top: 40px; /* Forces explicit space above the footer! */
+  letter-spacing: 4px;
 }

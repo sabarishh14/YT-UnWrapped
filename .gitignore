@@ -1,5 +1,7 @@
 node_modules/
+test_files/
 dist/
+*.db
 .env*
 __pycache__/
 *.pyc
@@ -7,4 +9,3 @@ __pycache__/
 venv/
 *.egg-info/
 .DS_Store
-backend/local_data.db
