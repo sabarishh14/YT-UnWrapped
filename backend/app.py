@@ -20,7 +20,7 @@ app = Flask(__name__)
 CORS(app, resources={
     r"/*": {
         "origins": [
-            "http://localhost:3000",
+            "http://localhost:5173",
             "https://yt-un-wrapped.vercel.app/" # The URL Vercel gives you
         ],
         "methods": ["GET", "POST", "OPTIONS"],
@@ -99,7 +99,8 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
     return new_records
 
 def init_db():
-    with sqlite3.connect(LOCAL_DB_PATH) as conn:
+    with sqlite3.connect(LOCAL_DB_PATH, timeout=15.0) as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
         cur = conn.cursor()
         cur.execute("""
             CREATE TABLE IF NOT EXISTS artist_cache (
@@ -345,32 +346,40 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
             
     return None
 
-def enrich_artists(records: list) -> None:
+def enrich_artists(records: list, user_id: str) -> None:
     seen = {}
     for r in records:
         if r["title"] not in ARTIST_CACHE and r["title"] not in seen:
-            seen[r["title"]] = (r["artist"], r["video_id"]) # Grab video_id here!
+            seen[r["title"]] = (r["artist"], r["video_id"])
 
     uncached = [(title, art, vid) for title, (art, vid) in seen.items()]
     
     global PROGRESS
-    PROGRESS["total"] = len(uncached)
-    PROGRESS["processed"] = 0
+    if user_id not in PROGRESS:
+        PROGRESS[user_id] = {"message": "Idle", "processed": 0, "total": 0}
+        
+    PROGRESS[user_id]["total"] = len(uncached)
+    PROGRESS[user_id]["processed"] = 0
     if len(uncached) > 0:
-        PROGRESS["message"] = "Finding album art & high-res details..."
+        PROGRESS[user_id]["message"] = "Finding album art & high-res details..."
     
-    app.logger.info(f"Enriching {len(uncached)} new titles ({len(ARTIST_CACHE)} already cached)")
+    app.logger.info(f"Enriching {len(uncached)} new titles for {user_id}...")
 
-    # FAST PARALLEL FETCHING (Now passes video_id)
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM)
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
         for i, future in enumerate(as_completed(futures)):
-            PROGRESS["processed"] = i + 1
+            # THIS IS THE CRITICAL LINE THAT UPDATES THE FRONTEND:
+            PROGRESS[user_id]["processed"] = i + 1
+            
+            # Print to the terminal so you can verify the backend isn't frozen!
+            if (i + 1) % 10 == 0 or (i + 1) == len(uncached):
+                print(f"Processed {i+1}/{len(uncached)}")
 
     if uncached:
         save_cache()
 
-    PROGRESS["message"] = "Wrapping things up..."
+    PROGRESS[user_id]["message"] = "Wrapping things up..."
 
     for r in records:
         meta = ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})
@@ -656,26 +665,25 @@ def compute_full_history(records, durations):
 
 # ── Global Progress Tracker ──────────────────────────────
 
-PROGRESS = {"message": "Idle", "processed": 0, "total": 0}
+PROGRESS = {}
 
 @app.route("/api/progress", methods=["GET"])
 def get_progress():
-    return jsonify(PROGRESS)
+    user_id = request.args.get("user_id")
+    if not user_id or user_id not in PROGRESS:
+        return jsonify({"message": "Idle", "processed": 0, "total": 0})
+    return jsonify(PROGRESS[user_id])
 
 # ─────────────────────────────────────────────────────────
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
     try:
-        global PROGRESS
-        PROGRESS["message"] = "Unwrapping your listening history..."
-        PROGRESS["processed"] = 0
-        PROGRESS["total"] = 0
-        
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
-        
-        # FIX: Extract BOTH user_id and lastfm_username
         user_id = body.get("user_id", "").strip()
+        
+        global PROGRESS
+        PROGRESS[user_id] = {"message": "Unwrapping your listening history...", "processed": 0, "total": 0}
         lastfm_username = body.get("lastfm_username", "").strip()
         
         # 1. Load existing history using the persistent user_id!
@@ -701,7 +709,7 @@ def analyze():
             return jsonify({"error": "No valid entries found from Takeout or History."}), 400
 
         # 6. Enrich artists (Fetch Saavn data for any new songs)
-        enrich_artists(records)
+        enrich_artists(records, user_id)
 
         # 7. Save the unified history using the persistent user_id!
         if user_id:
@@ -768,6 +776,9 @@ def analyze():
                 "hour_heatmap":     compute_hour_heatmap(mrs, durations),
                 "history":          compute_full_history(mrs, durations),
             }
+
+        # Clear the user's progress from memory to save RAM
+        PROGRESS.pop(user_id, None)
 
         return jsonify({
             "months_available": sorted(months.keys()),

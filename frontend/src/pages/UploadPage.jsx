@@ -17,7 +17,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
 
     return setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/progress`)
+        const res = await fetch(`${API_BASE}/api/progress?user_id=${userId}`)
         const data = await res.json()
         
         if (data.total > 0 && data.processed > 0) {
