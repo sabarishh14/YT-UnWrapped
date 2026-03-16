@@ -366,7 +366,7 @@ def enrich_artists(records: list, user_id: str) -> None:
     app.logger.info(f"Enriching {len(uncached)} new titles for {user_id}...")
 
     # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM)
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
         for i, future in enumerate(as_completed(futures)):
             # THIS IS THE CRITICAL LINE THAT UPDATES THE FRONTEND:
