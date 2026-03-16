@@ -54,21 +54,35 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
     if not LASTFM_API_KEY or not username:
         return []
         
-    params = {
-        "method": "user.getrecenttracks",
-        "user": username,
-        "api_key": LASTFM_API_KEY,
-        "format": "json",
-        "limit": 200
-    }
-    if from_ts:
-        params["from"] = int(from_ts)
-        
     new_records = []
-    try:
-        resp = requests.get("https://ws.audioscrobbler.com/2.0/", params=params, timeout=10)
-        if resp.ok:
-            tracks = resp.json().get("recenttracks", {}).get("track", [])
+    page = 1
+    total_pages = 1
+    
+    # We will fetch up to 10 pages (2,000 tracks) per sync to prevent server timeouts
+    while page <= total_pages and page <= 10:
+        params = {
+            "method": "user.getrecenttracks",
+            "user": username,
+            "api_key": LASTFM_API_KEY,
+            "format": "json",
+            "limit": 200,
+            "page": page
+        }
+        if from_ts:
+            params["from"] = int(from_ts)
+            
+        try:
+            resp = requests.get("https://ws.audioscrobbler.com/2.0/", params=params, timeout=10)
+            if not resp.ok:
+                break
+                
+            data = resp.json().get("recenttracks", {})
+            
+            # Update the total pages on the first request
+            if page == 1:
+                total_pages = int(data.get("@attr", {}).get("totalPages", 1))
+                
+            tracks = data.get("track", [])
             if isinstance(tracks, dict):
                 tracks = [tracks]
                 
@@ -79,7 +93,12 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
                 title = t.get("name", "")
                 artist = t.get("artist", {}).get("#text", "Unknown Artist")
                 
-                ts_unix = int(t.get("date", {}).get("uts", 0))
+                # Protect against tracks missing timestamps
+                uts = t.get("date", {}).get("uts")
+                if not uts:
+                    continue
+                    
+                ts_unix = int(uts)
                 ts = datetime.fromtimestamp(ts_unix, tz=timezone.utc)
                 
                 vid = "lfm_" + hashlib.md5(f"{title}{artist}".encode()).hexdigest()[:7]
@@ -93,9 +112,14 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
                     "year_month": ts.strftime("%Y-%m"),
                     "date": ts.strftime("%Y-%m-%d"),
                 })
-    except Exception as e:
-        app.logger.warning(f"LastFM fetch error: {e}")
-        
+                
+            page += 1
+            time.sleep(0.1) # Be nice to the Last.fm API
+            
+        except Exception as e:
+            app.logger.warning(f"LastFM fetch error on page {page}: {e}")
+            break
+            
     return new_records
 
 def init_db():
