@@ -1,5 +1,6 @@
 flask==3.0.2
 flask-cors==4.0.0
 requests==2.31.0
-python-dotenv==1.0.0
-ytmusicapi==0.25.13
+python-dotenv
+ytmusicapi
+gunicorn==21.2.0

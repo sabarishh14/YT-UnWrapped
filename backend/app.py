@@ -21,7 +21,7 @@ CORS(app, resources={
     r"/*": {
         "origins": [
             "http://localhost:5173",
-            "https://yt-un-wrapped.vercel.app/" # The URL Vercel gives you
+            "https://yt-un-wrapped.vercel.app" # Make sure there is NO trailing slash here!
         ],
         "methods": ["GET", "POST", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
@@ -662,6 +662,13 @@ def compute_full_history(records, durations):
     return history
 
 # ── Routes ───────────────────────────────────────────────
+
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "status": "online", 
+        "message": "YT Music Unwrapped API is running smoothly!"
+    })
 
 # ── Global Progress Tracker ──────────────────────────────
 
