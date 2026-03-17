@@ -122,13 +122,16 @@ function HistorySection({ history }) {
         <span className={styles.historyCount}>{history?.length?.toLocaleString()} plays</span>
       </div>
 
-      <div className={styles.historyTable}>
-        <div className={styles.historyHead}>
-          <span>#</span>
-          <span>Song</span>
-          <span>Artist</span>
-          <span>Album</span>
-        </div>
+      {/* NEW: Scrollable Wrapper */}
+      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '12px' }}>
+        <div className={styles.historyTable} style={{ minWidth: '600px' }}>
+          
+          <div className={styles.historyHead}>
+            <span>#</span>
+            <span>Song</span>
+            <span>Artist</span>
+            <span>Album</span>
+          </div>
         <div className={styles.historyBody}>
           {(visible || []).map((item, i) => (
             <a
@@ -152,6 +155,7 @@ function HistorySection({ history }) {
             </a>
           ))}
         </div>
+      </div>
       </div>
 
       {history?.length > 50 && (

@@ -1,5 +1,15 @@
 import re
 import os
+
+# --- NEW: FORCE ALL NETWORK TRAFFIC THROUGH THE PROXY GLOBALLY ---
+PROXY_URL = os.environ.get("PROXY_URL")
+if PROXY_URL:
+    os.environ["http_proxy"] = PROXY_URL
+    os.environ["https_proxy"] = PROXY_URL
+    os.environ["HTTP_PROXY"] = PROXY_URL
+    os.environ["HTTPS_PROXY"] = PROXY_URL
+# -----------------------------------------------------------------
+
 import json
 import time
 import calendar
@@ -33,13 +43,83 @@ LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
 # Setup local SQLite instead of Neon DB
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-LOCAL_DB_PATH = os.path.join(BASE_DIR, "local_data.db")
 
-PROXY_URL = os.environ.get("PROXY_URL")
+from contextlib import contextmanager  
+
+# --- BULLETPROOF SQLITE IMPORT ---
+try:
+    import libsql_experimental as sqlite3
+    HAS_LIBSQL = True
+except ImportError:
+    import sqlite3 # Built-in Python library, zero installation required!
+    HAS_LIBSQL = False
+    print("⚠️ libsql-experimental not found. Falling back to local file DB.")
+
+# --- TURSO CLOUD DB SETUP ---
+TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+
+@contextmanager
+def get_db_connection():
+    conn = None
+    # NEW: Only try connecting to Turso if the library actually successfully imported!
+    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and HAS_LIBSQL:
+        # 1. Strip hidden spaces from Hugging Face secrets
+        clean_url = TURSO_DATABASE_URL.strip()
+        clean_token = TURSO_AUTH_TOKEN.strip()
+        
+        # 2. Pass the token as a dedicated argument, NOT in the URL
+        conn = sqlite3.connect(clean_url, auth_token=clean_token)
+    else:
+        # Fallback to local file
+        LOCAL_DB_PATH = os.path.join(BASE_DIR, "local_data.db")
+        conn = sqlite3.connect(LOCAL_DB_PATH, timeout=15.0)
+        
+    try:
+        yield conn
+    finally:
+        # 3. Safely check if the connection exists and can be closed before closing
+        if conn and hasattr(conn, "close"):
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+# Initialize tables
+def init_db():
+    with get_db_connection() as conn:
+        # WAL mode is great for local files, but Turso cloud handles its own journaling
+        if not TURSO_DATABASE_URL:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS artist_cache (
+                title TEXT PRIMARY KEY,
+                meta TEXT
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS listens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT,
+                video_id TEXT,
+                title TEXT,
+                played_at TEXT,
+                record_data TEXT,
+                UNIQUE(username, title, played_at)
+            );
+        """)
+        conn.commit()
+
+# --- ADD THIS LINE TO DEBUG ---
+app.logger.info(f"🚨 PROXY LOADED: {bool(PROXY_URL)}") 
+# ------------------------------
+
 session = requests.Session()
 if PROXY_URL:
     session.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
-    
+
 ytmusic = YTMusic(requests_session=session)
 
 ytmusic = YTMusic()
@@ -129,36 +209,11 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
             
     return new_records
 
-def init_db():
-    with sqlite3.connect(LOCAL_DB_PATH, timeout=15.0) as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS artist_cache (
-                title TEXT PRIMARY KEY,
-                meta TEXT
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS listens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT,
-                video_id TEXT,
-                title TEXT,
-                played_at TEXT,
-                record_data TEXT,
-                UNIQUE(username, title, played_at)
-            );
-        """)
-        conn.commit()
-
-init_db()
-
 def load_cache():
     global ARTIST_CACHE
     ARTIST_CACHE = {}
     try:
-        with sqlite3.connect(LOCAL_DB_PATH) as conn:
+        with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT title, meta FROM artist_cache")
             for row in cur.fetchall():
@@ -169,7 +224,7 @@ def load_cache():
 
 def save_cache():
     try:
-        with sqlite3.connect(LOCAL_DB_PATH) as conn:
+        with get_db_connection() as conn:
             cur = conn.cursor()
             for title, meta in ARTIST_CACHE.items():
                 cur.execute("""
@@ -181,7 +236,18 @@ def save_cache():
     except Exception as e:
         app.logger.error(f"DB Cache save error: {e}")
 
-load_cache()
+# --- LAZY INITIALIZATION ---
+# This ensures Turso only connects AFTER Gunicorn has fully booted
+_app_initialized = False
+
+@app.before_request
+def initialize_setup():
+    global _app_initialized
+    if not _app_initialized:
+        init_db()
+        load_cache()
+        _app_initialized = True
+# ---------------------------
 
 # ── Helpers ──────────────────────────────────────────────
 
@@ -380,6 +446,9 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
     return None
 
 def enrich_artists(records: list, user_id: str) -> None:
+    # --- ADD THIS LOUD DEBUG LINE ---
+    print(f"\n🚨🚨🚨 PROXY SECRET IS: {os.environ.get('PROXY_URL')} 🚨🚨🚨\n", flush=True)
+    # --------------------------------
     seen = {}
     for r in records:
         if r["title"] not in ARTIST_CACHE and r["title"] not in seen:
@@ -490,7 +559,7 @@ def parse_entries(raw_entries):
 def load_history(username):
     if not username: return []
     try:
-        with sqlite3.connect(LOCAL_DB_PATH) as conn:
+        with get_db_connection() as conn:
             cur = conn.cursor()
             cur.execute("SELECT record_data FROM listens WHERE username = ? ORDER BY played_at ASC", (username,))
             records = []
@@ -506,7 +575,7 @@ def load_history(username):
 def save_history(username, records):
     if not username: return
     try:
-        with sqlite3.connect(LOCAL_DB_PATH) as conn:
+        with get_db_connection() as conn:
             cur = conn.cursor()
             for r in records:
                 row = r.copy()
@@ -713,7 +782,7 @@ def clear_data():
         if not user_id:
             return jsonify({"error": "No user ID provided"}), 400
             
-        with sqlite3.connect(LOCAL_DB_PATH, timeout=15.0) as conn:
+        with get_db_connection() as conn:
             cur = conn.cursor()
             # In your DB, 'username' is the column that stores the user_id
             cur.execute("DELETE FROM listens WHERE username = ?", (user_id,))
@@ -761,10 +830,10 @@ def analyze():
         last_ts = None
         if merged_records:
             latest_record = max(merged_records, key=lambda x: x["timestamp"])
-            last_ts = latest_record["timestamp"].timestamp()
+            # Add 1 second so we only fetch tracks played strictly AFTER our last saved track
+            last_ts = int(latest_record["timestamp"].timestamp()) + 1
             
         lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts) if lastfm_username else []
-        print(lfm_records)
         # 5. Merge Last.fm scrobbles
         records = merge_records(lfm_records, merged_records)
         if not records:
