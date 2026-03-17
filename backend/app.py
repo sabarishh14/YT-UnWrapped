@@ -35,6 +35,13 @@ LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
 LOCAL_DB_PATH = os.path.join(BASE_DIR, "local_data.db")
 
+PROXY_URL = os.environ.get("PROXY_URL")
+session = requests.Session()
+if PROXY_URL:
+    session.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
+    
+ytmusic = YTMusic(requests_session=session)
+
 ytmusic = YTMusic()
 
 DEFAULT_TRACK_DURATION = 210  # 3.5 min fallback
@@ -204,9 +211,11 @@ def fetch_durations_batch(video_ids):
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         try:
+            proxies_dict = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
             resp = requests.get(
                 "https://www.googleapis.com/youtube/v3/videos",
                 params={"key": YT_API_KEY, "id": ",".join(batch), "part": "contentDetails"},
+                proxies=proxies_dict,
                 timeout=10,
             )
             if resp.ok:
@@ -413,23 +422,24 @@ def enrich_artists(records: list, user_id: str) -> None:
         r["artists"]    = split_artists(meta.get("artist", r["artist"]))
         r["artist"]     = r["artists"][0]
         r["saavn_name"] = meta.get("saavn_name")
-        r["album"]      = meta.get("album")
-        r["music_directors"] = meta.get("music_directors", []) # <-- ADD THIS LINE
+        # --- 1. ALBUM: Trust Last.fm FIRST to fix the "Single vs Album" issue ---
+        r["album"]      = r.get("album") or meta.get("album")
         
-        # --- NEW: Replace fake Last.fm ID with the real YouTube ID! ---
+        # --- 2. EVERYTHING ELSE: Trust YouTube Music FIRST for higher quality data ---
+        r["music_directors"] = meta.get("music_directors", [])
+        
         if meta.get("real_video_id"):
             r["video_id"] = meta["real_video_id"]
-        # --------------------------------------------------------------
         
-        # Safely parse duration
         raw_dur = meta.get("duration")
         try:
             r["duration"] = int(raw_dur) if raw_dur else None
         except (ValueError, TypeError):
             r["duration"] = None
             
-        r["image"]      = meta.get("image")
-        
+        # Trust YT Music's high-res thumbnails first, fallback to Last.fm if YT fails
+        r["image"]      = meta.get("image") or r.get("image")
+    
 # ── Parsing ──────────────────────────────────────────────
 
 def extract_video_id(url):
@@ -694,6 +704,27 @@ def index():
         "message": "YT Music Unwrapped API is running smoothly!"
     })
 
+@app.route("/api/clear", methods=["POST"])
+def clear_data():
+    try:
+        body = request.get_json(force=True)
+        user_id = body.get("user_id", "").strip()
+        
+        if not user_id:
+            return jsonify({"error": "No user ID provided"}), 400
+            
+        with sqlite3.connect(LOCAL_DB_PATH, timeout=15.0) as conn:
+            cur = conn.cursor()
+            # In your DB, 'username' is the column that stores the user_id
+            cur.execute("DELETE FROM listens WHERE username = ?", (user_id,))
+            conn.commit()
+            
+        return jsonify({"status": "success", "message": "User data cleared."})
+        
+    except Exception as e:
+        app.logger.error(f"Error clearing data: {e}")
+        return jsonify({"error": str(e)}), 500
+    
 # ── Global Progress Tracker ──────────────────────────────
 
 PROGRESS = {}
