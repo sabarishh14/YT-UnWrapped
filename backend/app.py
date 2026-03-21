@@ -41,75 +41,44 @@ CORS(app, resources={
 YT_API_KEY     = os.environ.get("YT_API_KEY", "")
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
-# Setup local SQLite instead of Neon DB
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-
+import psycopg2
+from psycopg2.extras import execute_values
 from contextlib import contextmanager  
 
-# --- BULLETPROOF SQLITE IMPORT ---
-try:
-    import libsql_experimental as sqlite3
-    HAS_LIBSQL = True
-except ImportError:
-    import sqlite3 # Built-in Python library, zero installation required!
-    HAS_LIBSQL = False
-    print("⚠️ libsql-experimental not found. Falling back to local file DB.")
-
-# --- TURSO CLOUD DB SETUP ---
-TURSO_DATABASE_URL = os.environ.get("TURSO_DATABASE_URL")
-TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
+# --- SUPABASE / POSTGRES CLOUD DB SETUP ---
+# Just put your Supabase connection string in the HuggingFace Secrets as DATABASE_URL
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
 @contextmanager
 def get_db_connection():
-    conn = None
-    # NEW: Only try connecting to Turso if the library actually successfully imported!
-    if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and HAS_LIBSQL:
-        # 1. Strip hidden spaces from Hugging Face secrets
-        clean_url = TURSO_DATABASE_URL.strip()
-        clean_token = TURSO_AUTH_TOKEN.strip()
-        
-        # 2. Pass the token as a dedicated argument, NOT in the URL
-        conn = sqlite3.connect(clean_url, auth_token=clean_token)
-    else:
-        # Fallback to local file
-        LOCAL_DB_PATH = os.path.join(BASE_DIR, "local_data.db")
-        conn = sqlite3.connect(LOCAL_DB_PATH, timeout=15.0)
-        
+    conn = psycopg2.connect(DATABASE_URL)
     try:
         yield conn
     finally:
-        # 3. Safely check if the connection exists and can be closed before closing
-        if conn and hasattr(conn, "close"):
-            try:
-                conn.close()
-            except Exception:
-                pass
+        conn.close()
 
 # Initialize tables
 def init_db():
+    if not DATABASE_URL: return
     with get_db_connection() as conn:
-        # WAL mode is great for local files, but Turso cloud handles its own journaling
-        if not TURSO_DATABASE_URL:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS artist_cache (
-                title TEXT PRIMARY KEY,
-                meta TEXT
-            );
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS listens (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT,
-                video_id TEXT,
-                title TEXT,
-                played_at TEXT,
-                record_data TEXT,
-                UNIQUE(username, title, played_at)
-            );
-        """)
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS artist_cache (
+                    title TEXT PRIMARY KEY,
+                    meta JSONB
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS listens (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT,
+                    video_id TEXT,
+                    title TEXT,
+                    played_at TIMESTAMP,
+                    record_data JSONB,
+                    UNIQUE(username, title, played_at)
+                );
+            """)
         conn.commit()
 
 # --- ADD THIS LINE TO DEBUG ---
@@ -212,26 +181,31 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
 def load_cache():
     global ARTIST_CACHE
     ARTIST_CACHE = {}
+    if not DATABASE_URL: return
     try:
         with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT title, meta FROM artist_cache")
-            for row in cur.fetchall():
-                ARTIST_CACHE[row[0]] = json.loads(row[1])
-        app.logger.info(f"Loaded {len(ARTIST_CACHE)} cached artists locally")
+            with conn.cursor() as cur:
+                cur.execute("SELECT title, meta FROM artist_cache")
+                for row in cur.fetchall():
+                    # psycopg2 automatically converts JSONB columns to Python dicts!
+                    meta = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+                    ARTIST_CACHE[row[0]] = meta
+        app.logger.info(f"Loaded {len(ARTIST_CACHE)} cached artists from cloud")
     except Exception as e:
         app.logger.warning(f"DB Cache load error: {e}")
 
 def save_cache():
+    if not ARTIST_CACHE or not DATABASE_URL: return
     try:
         with get_db_connection() as conn:
-            cur = conn.cursor()
-            for title, meta in ARTIST_CACHE.items():
-                cur.execute("""
+            with conn.cursor() as cur:
+                query = """
                     INSERT INTO artist_cache (title, meta)
-                    VALUES (?, ?)
-                    ON CONFLICT(title) DO UPDATE SET meta = excluded.meta;
-                """, (title, json.dumps(meta)))
+                    VALUES %s
+                    ON CONFLICT (title) DO UPDATE SET meta = EXCLUDED.meta;
+                """
+                values = [(title, json.dumps(meta)) for title, meta in ARTIST_CACHE.items()]
+                execute_values(cur, query, values)
             conn.commit()
     except Exception as e:
         app.logger.error(f"DB Cache save error: {e}")
@@ -331,12 +305,23 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             if not results:
                 results = ytmusic.search(search_query, filter="videos", limit=1)
                 
-            # Attempt 3: If STILL failing, drop the artist name and just search the title
             if not results and channel_artist:
                 results = ytmusic.search(clean_title, filter="songs", limit=1)
 
             if results:
-                best_match = results[0]
+                potential_match = results[0]
+                # SANITY CHECK: Does the found title or artist actually resemble our query?
+                found_title = potential_match.get('title', '').lower()
+                found_artists = " ".join([a['name'] for a in potential_match.get('artists', [])]).lower()
+                
+                query_words = set(clean_title.lower().split() + channel_artist.lower().split())
+                match_words = set(found_title.split() + found_artists.split())
+                
+                # If they share at least one meaningful word, accept it. Otherwise, reject the hallucination.
+                if len(query_words.intersection(match_words)) > 0:
+                    best_match = potential_match
+                else:
+                    app.logger.warning(f"Rejected false match: {clean_title} -> {found_title}")
 
         if best_match:
             artists = [a['name'] for a in best_match.get('artists', [])]
@@ -554,44 +539,48 @@ def parse_entries(raw_entries):
 
 # ── History Persistence & Last.fm ────────────────────────
 
-# ── History Persistence & Last.fm ────────────────────────
-
 def load_history(username):
-    if not username: return []
+    if not username or not DATABASE_URL: return []
     try:
         with get_db_connection() as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT record_data FROM listens WHERE username = ? ORDER BY played_at ASC", (username,))
-            records = []
-            for row in cur.fetchall():
-                rec = json.loads(row[0])
-                rec['timestamp'] = datetime.fromisoformat(rec['timestamp'])
-                records.append(rec)
-            return records
+            with conn.cursor() as cur:
+                cur.execute("SELECT record_data FROM listens WHERE username = %s ORDER BY played_at ASC", (username,))
+                records = []
+                for row in cur.fetchall():
+                    rec = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    rec['timestamp'] = datetime.fromisoformat(rec['timestamp'])
+                    records.append(rec)
+                return records
     except Exception as e:
         app.logger.error(f"DB History load error: {e}")
         return []
 
 def save_history(username, records):
-    if not username: return
+    if not username or not records or not DATABASE_URL: return
     try:
         with get_db_connection() as conn:
-            cur = conn.cursor()
-            for r in records:
-                row = r.copy()
-                if isinstance(row["timestamp"], datetime):
-                    row["timestamp"] = row["timestamp"].isoformat()
-                
-                cur.execute("""
-                    INSERT OR IGNORE INTO listens (username, video_id, title, played_at, record_data)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    username, 
-                    row.get("video_id"), 
-                    row.get("title"), 
-                    row["timestamp"], 
-                    json.dumps(row)
-                ))
+            with conn.cursor() as cur:
+                query = """
+                    INSERT INTO listens (username, video_id, title, played_at, record_data)
+                    VALUES %s
+                    ON CONFLICT (username, title, played_at) DO NOTHING
+                """
+                values = []
+                for r in records:
+                    row = r.copy()
+                    # Directly update the dictionary so json.dumps doesn't choke
+                    if isinstance(row["timestamp"], datetime):
+                        row["timestamp"] = row["timestamp"].isoformat()
+                    
+                    values.append((
+                        username, 
+                        row.get("video_id"), 
+                        row.get("title"), 
+                        row["timestamp"], 
+                        json.dumps(row)
+                    ))
+                # EXTREME SPEEDUP: This inserts all records in one network trip
+                execute_values(cur, query, values)
             conn.commit()
     except Exception as e:
         app.logger.error(f"DB History save error: {e}")
@@ -783,9 +772,8 @@ def clear_data():
             return jsonify({"error": "No user ID provided"}), 400
             
         with get_db_connection() as conn:
-            cur = conn.cursor()
-            # In your DB, 'username' is the column that stores the user_id
-            cur.execute("DELETE FROM listens WHERE username = ?", (user_id,))
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM listens WHERE username = %s", (user_id,))
             conn.commit()
             
         return jsonify({"status": "success", "message": "User data cleared."})
@@ -911,6 +899,12 @@ def analyze():
         # Clear the user's progress from memory to save RAM
         PROGRESS.pop(user_id, None)
 
+        # --- ADDED THIS TO GET THE LATEST DATE ---
+        last_played_date = "Unknown"
+        if records:
+            latest_rec = max(records, key=lambda x: x["timestamp"])
+            last_played_date = latest_rec["timestamp"].strftime("%b %d, %Y")
+
         return jsonify({
             "months_available": sorted(months.keys()),
             "monthly_stats":    monthly_stats,
@@ -918,6 +912,7 @@ def analyze():
                 "total_plays":    len(records),
                 "unique_artists": len(set(r["artist"] for r in records)),
                 "unique_songs":   len(set(r["video_id"] for r in records)),
+                "last_played":    last_played_date # <-- ADDED TO RESPONSE
             },
         })
 
@@ -933,7 +928,7 @@ def health():
         "lastfm_api":       bool(LASTFM_API_KEY),
         "cached_artists":   len(ARTIST_CACHE),
         "cached_durations": len(DURATION_CACHE),
-        "cache_file":       LOCAL_DB_PATH,
+        "cache_file":       "Supabase PostgreSQL",
     })
 
 if __name__ == "__main__":

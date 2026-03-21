@@ -13,6 +13,7 @@ export default function App() {
   const [user, setUser] = useState(null) // Holds the Firebase user
   const [lastFmUser, setLastFmUser] = useState(null)
   const [isInitializing, setIsInitializing] = useState(true)
+  const [isFetchingCloud, setIsFetchingCloud] = useState(false) // <-- ADDED THIS
 
   useEffect(() => {
     const storedLastFm = localStorage.getItem('yt_lastfm')
@@ -23,6 +24,7 @@ export default function App() {
       setUser(currentUser);
       
       if (currentUser) {
+        setIsFetchingCloud(true); // <-- Block the UI while fetching
         // User is logged in, fetch their saved history using their permanent UID
         fetch(`${API_BASE}/api/analyze`, {
           method: 'POST',
@@ -33,11 +35,14 @@ export default function App() {
           .then(data => {
             if (!data.error && data.months_available?.length > 0) {
               setAnalysisData(data)
-              setFileName('Loaded from Cloud Sync')
+              setFileName(`Cloud Data (Last play: ${data.summary?.last_played || 'Recent'})`) // <-- ADDED DATE
             }
           })
           .catch(err => console.log('No existing data found, ready for upload.'))
-          .finally(() => setIsInitializing(false))
+          .finally(() => {
+            setIsInitializing(false)
+            setIsFetchingCloud(false) // <-- Free the UI
+          })
       } else {
         // User is logged out
         setAnalysisData(null)
@@ -87,8 +92,14 @@ export default function App() {
     setFileName('')
   }
 
-  if (isInitializing) {
-    return <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888' }}>Loading Unwrapped...</div>
+  if (isInitializing || isFetchingCloud) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', gap: '16px' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,0,0,0.2)', borderTopColor: '#FF0000', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+        <p>{isFetchingCloud ? "Pulling your Unwrapped from the cloud..." : "Starting up..."}</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
   }
 
   // ── Show Login Screen if not authenticated ──
