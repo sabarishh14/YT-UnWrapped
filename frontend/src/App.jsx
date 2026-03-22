@@ -4,6 +4,7 @@ import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
 import { auth, loginWithGoogle, logout } from './firebase.js'
 import { onAuthStateChanged } from 'firebase/auth'
+import SharedPage from './pages/SharedPage.jsx' // <--- Add this!
 
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -15,7 +16,15 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [isFetchingCloud, setIsFetchingCloud] = useState(false) // <-- ADDED THIS
 
-  // The Silent Refresh Engine
+  // Hash Routing State
+  const [hash, setHash] = useState(window.location.hash);
+
+  useEffect(() => {
+    const handleHashChange = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
   // The Silent Refresh Engine
   const fetchCloudData = (uid, lfm, silent = false) => {
     if (!silent) {
@@ -135,6 +144,12 @@ export default function App() {
     setFileName('')
   }
 
+  // ── HIJACK RENDER: IF IT'S A SHARED LINK, BYPASS EVERYTHING! ──
+  if (hash.startsWith('#/share/')) {
+    const token = hash.replace('#/share/', '').split('?')[0];
+    return <SharedPage token={token} />;
+  }
+  
   if (isInitializing || isFetchingCloud) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', gap: '16px' }}>

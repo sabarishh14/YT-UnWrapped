@@ -112,7 +112,8 @@ function TimeBreakdown({ weekly, dow, hours }) {
   )
 }
 
-function HistorySection({ history, onRefresh }) {
+// Accept the new prop
+function HistorySection({ history, onRefresh, isReadOnly }) {  
   const [expanded, setExpanded] = React.useState(false)
   const [hiddenIds, setHiddenIds] = React.useState(new Set()) // Track hidden songs instantly
 
@@ -187,17 +188,19 @@ function HistorySection({ history, onRefresh }) {
                 <span className={styles.historyArtist} title={item.artist}>{item.artist}</span>
                 <span className={styles.historyAlbum} title={item.album}>{item.album || '-'}</span>
                 
-                {/* --- WIRED UP: Hide Track Button --- */}
-                <button 
-                  className={styles.hideBtn} 
-                  onClick={(e) => handleHideTrack(e, item.video_id)}
-                  title="Hide this track from your stats"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
-                  </svg>
-                </button>
+                {/* --- WIRED UP: Hide Track Button (Hidden from friends!) --- */}
+                {!isReadOnly && (
+                  <button 
+                    className={styles.hideBtn} 
+                    onClick={(e) => handleHideTrack(e, item.video_id)}
+                    title="Hide this track from your stats"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                    </svg>
+                  </button>
+                )}
 
               </a>
             ))}
@@ -214,53 +217,39 @@ function HistorySection({ history, onRefresh }) {
   )
 }
 
-export default function MonthCapsule({ data, monthLabel, onRefresh }) {
+export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly = false }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
-  const posterRef = React.useRef(null) // <--- ADD THIS
-  const [isDownloading, setIsDownloading] = React.useState(false)
+  const posterRef = React.useRef(null) 
   
-  // --- NEW: Let the user control the list size ---
+  // States for BOTH buttons
+  const [isDownloading, setIsDownloading] = React.useState(false)
+  const [isSharing, setIsSharing] = React.useState(false)
   const [showTop10, setShowTop10] = React.useState(false) 
 
+  // 1. The ORIGINAL Image Downloader
   const handleDownload = async () => {
-    // 1. Make sure the hidden poster exists
     if (!posterRef.current) return
     setIsDownloading(true)
-    
     try {
       const { toPng } = await import('html-to-image')
-      
-      // 2. Instantly take the picture of the HIDDEN poster (no delays needed!)
       const dataUrl = await toPng(posterRef.current, {
         cacheBust: true,
         backgroundColor: '#050505',
         canvasWidth: 1080,
         canvasHeight: 1920,
-        // Bring back the glowing red glass effect!
         style: {
           backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(255, 0, 0, 0.15) 0%, transparent 60%), radial-gradient(circle at 90% 90%, rgba(255, 50, 50, 0.15) 0%, transparent 60%)',
         }
       })
-      
       const filename = `YT-Unwrapped-${monthLabel.replace(' ', '-')}.png`
-
       const blob = await (await fetch(dataUrl)).blob()
       const file = new File([blob], filename, { type: 'image/png' })
 
-      // 3. Try to open the Native Share Menu
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({
-            title: `${monthLabel} Unwrapped`,
-            text: `Check out my YouTube Music Unwrapped for ${monthLabel}!`,
-            files: [file]
-          })
-        } catch (shareErr) {
-          console.log('User canceled the share.', shareErr)
-        }
+        try { await navigator.share({ title: `${monthLabel} Unwrapped`, files: [file] }) } 
+        catch (shareErr) { console.log('User canceled share') }
       } else {
-        // Fallback: Download if on HTTP (local Wi-Fi) or unsupported browser
         const link = document.createElement('a')
         link.download = filename
         link.href = dataUrl
@@ -269,8 +258,33 @@ export default function MonthCapsule({ data, monthLabel, onRefresh }) {
     } catch (err) {
       console.error('Failed to capture snapshot', err)
     }
-    
     setIsDownloading(false)
+  }
+
+  // 2. The NEW Link Generator
+  const handleShareLink = async () => {
+    setIsSharing(true);
+    try {
+      const user_id = auth.currentUser?.uid;
+      if (!user_id) throw new Error("Not logged in");
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/publish_link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id, month_label: monthLabel, dashboard_data: data })
+      });
+      
+      const resData = await response.json();
+      if (resData.token) {
+        const shareUrl = `${window.location.origin}/#/share/${resData.token}`;
+        await navigator.clipboard.writeText(shareUrl);
+        alert(`Link copied to clipboard!\n\n${shareUrl}`);
+      }
+    } catch (err) {
+      console.error("Share failed", err);
+      alert("Failed to generate link. Make sure your backend is running.");
+    }
+    setIsSharing(false);
   }
 
   const artistSongs = React.useMemo(() => {
@@ -500,35 +514,59 @@ export default function MonthCapsule({ data, monthLabel, onRefresh }) {
 
       </div> {/* End of snapshot reference */}
 
-      {/* ── Share / Download Button ── */}
-      <div className={styles.shareActionContainer}>
-        <button 
-          className={styles.shareBtn} 
-          onClick={handleDownload} 
-          disabled={isDownloading}
-        >
-          {isDownloading ? (
-            <span className={styles.shareLoading}>Capturing Magic...</span>
-          ) : (
-            <>
-              {/* Using a standard 'Share' icon instead of a 'Download' icon */}
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="18" cy="5" r="3"></circle>
-                <circle cx="6" cy="12" r="3"></circle>
-                <circle cx="18" cy="19" r="3"></circle>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-              </svg>
-              Share Unwrapped Snapshot
-            </>
-          )}
-        </button>
-      </div>
+      {/* ── Share / Download Buttons (Hidden from friends!) ── */}
+      {!isReadOnly && (
+        <div className={styles.shareActionContainer} style={{ gap: '16px', flexWrap: 'wrap' }}>
+          
+          {/* Image Button */}
+          <button 
+            className={styles.shareBtn} 
+            onClick={handleDownload} 
+            disabled={isDownloading || isSharing}
+          >
+            {isDownloading ? (
+              <span className={styles.shareLoading}>Capturing...</span>
+            ) : (
+              <>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="17 8 12 3 7 8"></polyline>
+                  <line x1="12" y1="3" x2="12" y2="15"></line>
+                </svg>
+                Share Un-Wrapped Snapshot
+              </>
+            )}
+          </button>
 
-      {/* ── 4. Full History (RESTORED!) ── */}
-      <div style={{ marginTop: '32px' }}>
-        <HistorySection history={history} onRefresh={onRefresh} />
-      </div>
+          {/* Link Button */}
+          <button 
+            className={styles.shareBtn} 
+            onClick={handleShareLink} 
+            disabled={isDownloading || isSharing}
+            style={{ background: 'linear-gradient(135deg, #222 0%, #111 100%)', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {isSharing ? (
+              <span className={styles.shareLoading}>Generating...</span>
+            ) : (
+              <>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+                Copy Un-Wrapped Link
+              </>
+            )}
+          </button>
+
+        </div>
+      )}
+
+      {/* ── 4. Full History (Hidden from friends!) ── */}
+      {!isReadOnly && (
+        <div style={{ marginTop: '32px' }}>
+          <HistorySection history={history} onRefresh={onRefresh} isReadOnly={isReadOnly} />
+        </div>
+      )}
 
       {/* ── Artist detail drawer ── */}
       {artistDetail && (

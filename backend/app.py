@@ -9,13 +9,13 @@ if PROXY_URL:
     os.environ["HTTP_PROXY"] = PROXY_URL
     os.environ["HTTPS_PROXY"] = PROXY_URL
 # -----------------------------------------------------------------
-
 import json
 import time
 import calendar
 import requests
 import hashlib
 import sqlite3
+import uuid # <--- NEW: For generating secure share links
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -94,6 +94,16 @@ def init_db():
                     username TEXT PRIMARY KEY,
                     dashboard_data JSONB,
                     last_updated TIMESTAMP
+                );
+            """)
+            # --- NEW: Table for Public Shareable Links ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS shared_links (
+                    token TEXT PRIMARY KEY,
+                    username TEXT,
+                    month_label TEXT,
+                    dashboard_data JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
         conn.commit()
@@ -864,6 +874,55 @@ def unhide_track():
                 cur.execute("DELETE FROM hidden_tracks WHERE username = %s AND video_id = %s", (user_id, video_id))
             conn.commit()
         return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/publish_link", methods=["POST"])
+def publish_link():
+    try:
+        body = request.get_json(force=True)
+        user_id = body.get("user_id")
+        month_label = body.get("month_label")
+        dashboard_data = body.get("dashboard_data") # We will send the specific month's data
+        
+        if not user_id or not dashboard_data:
+            return jsonify({"error": "Missing data"}), 400
+            
+        # Generate a short, unique 8-character token (e.g. "a1b2c3d4")
+        token = str(uuid.uuid4()).split('-')[0]
+        
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO shared_links (token, username, month_label, dashboard_data)
+                    VALUES (%s, %s, %s, %s)
+                """, (token, user_id, month_label, json.dumps(dashboard_data)))
+            conn.commit()
+            
+        return jsonify({"status": "success", "token": token})
+        
+    except Exception as e:
+        app.logger.error(f"Error publishing link: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/shared/<token>", methods=["GET"])
+def get_shared_link(token):
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT month_label, dashboard_data, created_at FROM shared_links WHERE token = %s", (token,))
+                row = cur.fetchone()
+                
+                if row:
+                    data = row[1] if isinstance(row[1], dict) else json.loads(row[1])
+                    return jsonify({
+                        "month_label": row[0],
+                        "dashboard_data": data,
+                        "created_at": row[2]
+                    })
+                    
+        return jsonify({"error": "Link not found or expired"}), 404
+        
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     
