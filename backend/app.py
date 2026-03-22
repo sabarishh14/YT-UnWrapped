@@ -79,6 +79,23 @@ def init_db():
                     UNIQUE(username, title, played_at)
                 );
             """)
+            # --- NEW: Table for Hidden Tracks ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS hidden_tracks (
+                    username TEXT,
+                    video_id TEXT,
+                    PRIMARY KEY (username, video_id)
+                );
+            """)
+
+            # --- NEW: Cache the final math for instant loading ---
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_cache (
+                    username TEXT PRIMARY KEY,
+                    dashboard_data JSONB,
+                    last_updated TIMESTAMP
+                );
+            """)
         conn.commit()
 
 # --- ADD THIS LINE TO DEBUG ---
@@ -793,6 +810,63 @@ def get_progress():
         return jsonify({"message": "Idle", "processed": 0, "total": 0})
     return jsonify(PROGRESS[user_id])
 
+@app.route("/api/hide_track", methods=["POST"])
+def hide_track():
+    try:
+        body = request.get_json(force=True)
+        user_id = body.get("user_id")
+        video_id = body.get("video_id")
+        
+        if not user_id or not video_id:
+            return jsonify({"error": "Missing user_id or video_id"}), 400
+            
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Save it to the DB (DO NOTHING if they accidentally click it twice)
+                cur.execute("""
+                    INSERT INTO hidden_tracks (username, video_id) 
+                    VALUES (%s, %s) 
+                    ON CONFLICT DO NOTHING
+                """, (user_id, video_id))
+            conn.commit()
+            
+        return jsonify({"status": "success", "message": "Track hidden successfully!"})
+        
+    except Exception as e:
+        app.logger.error(f"Error hiding track: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/hidden_tracks", methods=["GET"])
+def get_hidden_tracks():
+    user_id = request.args.get("user_id")
+    if not user_id: return jsonify({"error": "Missing user_id"}), 400
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            # Grab the video ID, and the most recent title/artist associated with it
+            cur.execute("""
+                SELECT h.video_id, 
+                       (SELECT l.title FROM listens l WHERE l.video_id = h.video_id LIMIT 1),
+                       (SELECT l.record_data->>'artist' FROM listens l WHERE l.video_id = h.video_id LIMIT 1)
+                FROM hidden_tracks h
+                WHERE h.username = %s
+            """, (user_id,))
+            tracks = [{"video_id": row[0], "title": row[1] or "Unknown Track", "artist": row[2] or "Unknown Artist"} for row in cur.fetchall()]
+    return jsonify({"hidden_tracks": tracks})
+
+@app.route("/api/unhide_track", methods=["POST"])
+def unhide_track():
+    try:
+        body = request.get_json(force=True)
+        user_id = body.get("user_id")
+        video_id = body.get("video_id")
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM hidden_tracks WHERE username = %s AND video_id = %s", (user_id, video_id))
+            conn.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 # ─────────────────────────────────────────────────────────
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
@@ -800,42 +874,54 @@ def analyze():
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
         user_id = body.get("user_id", "").strip()
-        
-        global PROGRESS
-        PROGRESS[user_id] = {"message": "Unwrapping your listening history...", "processed": 0, "total": 0}
         lastfm_username = body.get("lastfm_username", "").strip()
+        quick_refresh = body.get("quick_refresh", False) # <--- NEW FLAG
+
+        global PROGRESS
+        if not quick_refresh:
+            PROGRESS[user_id] = {"message": "Unwrapping your listening history...", "processed": 0, "total": 0}
         
-        # 1. Load existing history using the persistent user_id!
+        # 1. Load existing history
         existing_records = load_history(user_id)
         
-        # 2. Parse new Takeout uploads if provided
-        takeout_records = parse_entries(raw_entries) if raw_entries else []
+        # 2. Parse new Takeout uploads (SKIP IF QUICK REFRESH)
+        takeout_records = parse_entries(raw_entries) if raw_entries and not quick_refresh else []
         
         # 3. Merge Takeout into existing
         merged_records = merge_records(existing_records, takeout_records)
         
-        # 4. Fetch new Last.fm scrobbles (Skips if no lastfm_username)
-        last_ts = None
-        if merged_records:
-            latest_record = max(merged_records, key=lambda x: x["timestamp"])
-            # Add 1 second so we only fetch tracks played strictly AFTER our last saved track
-            last_ts = int(latest_record["timestamp"].timestamp()) + 1
+        # 4. Fetch new Last.fm scrobbles (SKIP IF QUICK REFRESH)
+        lfm_records = []
+        if lastfm_username and not quick_refresh:
+            last_ts = None
+            if merged_records:
+                latest_record = max(merged_records, key=lambda x: x["timestamp"])
+                last_ts = int(latest_record["timestamp"].timestamp()) + 1
+            lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts)
             
-        lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts) if lastfm_username else []
         # 5. Merge Last.fm scrobbles
         records = merge_records(lfm_records, merged_records)
         if not records:
             return jsonify({"error": "No valid entries found from Takeout or History."}), 400
 
-        # 6. Enrich artists (Fetch Saavn data for any new songs)
-        enrich_artists(records, user_id)
-
-        # 7. Save the unified history using the persistent user_id!
+        # --- 5.5: THE GHOST TRACK KILLER ---
         if user_id:
-            save_history(user_id, records)
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT video_id FROM hidden_tracks WHERE username = %s", (user_id,))
+                    hidden_set = {row[0] for row in cur.fetchall()}
+            if hidden_set:
+                records = [r for r in records if r["video_id"] not in hidden_set]
 
-        # Build durations map using local cache (No more YT API fallback needed!)
+        # 6 & 7. Enrich and Save (SKIP IF QUICK REFRESH TO SAVE MASSIVE TIME!)
+        if not quick_refresh:
+            enrich_artists(records, user_id)
+            if user_id:
+                save_history(user_id, records)
+
+        # Build durations map using local cache
         durations = {}
+
         for r in records:
             vid = r["video_id"]
             if r.get("duration") and r["duration"] > 0:
@@ -905,19 +991,52 @@ def analyze():
             latest_rec = max(records, key=lambda x: x["timestamp"])
             last_played_date = latest_rec["timestamp"].strftime("%b %d, %Y")
 
-        return jsonify({
+       # --- NEW: Build the final payload, cache it, and return it ---
+        response_payload = {
             "months_available": sorted(months.keys()),
             "monthly_stats":    monthly_stats,
             "summary": {
                 "total_plays":    len(records),
                 "unique_artists": len(set(r["artist"] for r in records)),
                 "unique_songs":   len(set(r["video_id"] for r in records)),
-                "last_played":    last_played_date # <-- ADDED TO RESPONSE
-            },
-        })
+                "last_played":    last_played_date
+            }
+        }
+
+        if user_id:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO user_cache (username, dashboard_data, last_updated)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT (username) DO UPDATE SET 
+                        dashboard_data = EXCLUDED.dashboard_data,
+                        last_updated = CURRENT_TIMESTAMP
+                    """, (user_id, json.dumps(response_payload)))
+                conn.commit()
+
+        return jsonify(response_payload)
 
     except Exception as e:
         app.logger.error(f"Analysis error: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+# --- NEW: Ultra-fast route just to grab the cached JSON ---
+@app.route("/api/get_cache", methods=["GET"])
+def get_cache():
+    user_id = request.args.get("user_id")
+    if not user_id: return jsonify({"error": "Missing user_id"}), 400
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT dashboard_data FROM user_cache WHERE username = %s", (user_id,))
+                row = cur.fetchone()
+                if row and row[0]:
+                    # psycopg2 handles JSONB decoding automatically, but just in case:
+                    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                    return jsonify(data)
+        return jsonify({"error": "No cache found"}), 404
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/health", methods=["GET"])

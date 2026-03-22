@@ -5,7 +5,7 @@ import MonthCapsule from '../components/MonthCapsule.jsx'
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const FULL_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-export default function DashboardPage({ data }) {
+export default function DashboardPage({ data, onRefresh }) {
   const { months_available, monthly_stats, summary } = data
 
   const [selectedMonth, setSelectedMonth] = useState(() => months_available[months_available.length - 1])
@@ -84,6 +84,7 @@ export default function DashboardPage({ data }) {
           <MonthCapsule 
             data={capsuleData} 
             monthLabel={`${FULL_MONTH_NAMES[month - 1]} ${year}`} 
+            onRefresh={onRefresh}
           />
         </div>
       )}

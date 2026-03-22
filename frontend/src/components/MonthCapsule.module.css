@@ -206,6 +206,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  position: relative; /* Ensures the button positions itself relative to the row */
 }
 
 .rankNum {
@@ -539,6 +540,7 @@
   color: inherit;
   align-items: center;
   transition: background var(--transition);
+  position: relative; /* CRITICAL: Keeps the absolute hover button inside this row */
 }
 
 .historyRow:last-child { border-bottom: none; }
@@ -1250,4 +1252,47 @@
   color: #444;
   margin-top: 40px; /* Forces explicit space above the footer! */
   letter-spacing: 4px;
+}
+/* ── Hide Track Hover Button ── */
+.hideBtn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  cursor: pointer;
+  opacity: 0; /* Invisible by default */
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 10;
+}
+
+/* Reveal button on hover */
+.historyRow:hover .hideBtn {
+  opacity: 1;
+}
+
+/* Aggressive red when hovering the button itself */
+.hideBtn:hover {
+  color: #ff4444;
+  border-color: rgba(255, 68, 68, 0.4);
+  background: rgba(255, 68, 68, 0.1);
+}
+
+@media (max-width: 768px) {
+  .hideBtn {
+    opacity: 0.6; /* Subtly visible on mobile since hover doesn't exist */
+    background: transparent;
+    border: none;
+    right: 8px;
+  }
 }

@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react'
-import UploadPage from './pages/UploadPage.jsx'
+import { useState, useEffect, startTransition } from 'react' // <--- Add startTransitionimport UploadPage from './pages/UploadPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
 import { auth, loginWithGoogle, logout } from './firebase.js'
@@ -15,40 +14,86 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [isFetchingCloud, setIsFetchingCloud] = useState(false) // <-- ADDED THIS
 
+  // The Silent Refresh Engine
+  // The Silent Refresh Engine
+  const fetchCloudData = (uid, lfm, silent = false) => {
+    if (!silent) {
+      setIsFetchingCloud(true); 
+    } else {
+      // NEW: Instant visual feedback so you know it's working!
+      setFileName("Syncing changes..."); 
+    }
+    
+    fetch(`${API_BASE}/api/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        entries: [], 
+        user_id: uid, 
+        lastfm_username: lfm || "",
+        quick_refresh: silent 
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.error && data.months_available?.length > 0) {
+          // NEW: startTransition tells React to paint the new heavy dashboard 
+          // in the background WITHOUT freezing the user's screen!
+          startTransition(() => {
+            setAnalysisData(data);
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setFileName(`Cloud Data (Synced: ${timeStr})`); 
+          });
+        }
+      })
+      .catch(err => console.log('No existing data found.'))
+      .finally(() => {
+        setIsInitializing(false);
+        if (!silent) setIsFetchingCloud(false);
+      })
+  }
+
   useEffect(() => {
     const storedLastFm = localStorage.getItem('yt_lastfm')
     if (storedLastFm !== null) setLastFmUser(storedLastFm)
 
-    // Listen for Firebase login state changes
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       
       if (currentUser) {
-        setIsFetchingCloud(true); // <-- Block the UI while fetching
-        // User is logged in, fetch their saved history using their permanent UID
-        fetch(`${API_BASE}/api/analyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ entries: [], user_id: currentUser.uid, lastfm_username: storedLastFm || "" })
-        })
-          .then(res => res.json())
+        setIsFetchingCloud(true); // Show loading briefly while checking cache
+
+        // 1. Try to load the instant mathematical cache first!
+        fetch(`${API_BASE}/api/get_cache?user_id=${currentUser.uid}`)
+          .then(res => res.ok ? res.json() : Promise.reject('No cache'))
           .then(data => {
-            if (!data.error && data.months_available?.length > 0) {
-              setAnalysisData(data)
-              setFileName(`Cloud Data (Last play: ${data.summary?.last_played || 'Recent'})`) // <-- ADDED DATE
+            if (!data.error && data.months_available) {
+              startTransition(() => {
+                setAnalysisData(data);
+                setFileName(`Offline Cache (Syncing new tracks...)`);
+              });
+              setIsFetchingCloud(false); // Drop the loading screen instantly
+              
+              // 2. Silently sync Last.fm in the background!
+              fetchCloudData(currentUser.uid, storedLastFm, true); 
+            } else {
+              throw new Error("Invalid cache");
             }
           })
-          .catch(err => console.log('No existing data found, ready for upload.'))
-          .finally(() => {
-            setIsInitializing(false)
-            setIsFetchingCloud(false) // <-- Free the UI
-          })
+          .catch(() => {
+            // 3. If no cache exists (first time login), do a normal, loud boot
+            fetchCloudData(currentUser.uid, storedLastFm, false);
+          });
+
       } else {
         // User is logged out
-        setAnalysisData(null)
-        setFileName('')
-        setIsInitializing(false)
+        setAnalysisData(null);
+        setFileName('');
+        setIsInitializing(false);
       }
+    });
     });
 
     return () => unsubscribe();
@@ -225,23 +270,30 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      
       <Navbar 
         onGoBack={analysisData ? handleGoBack : null} 
         onClear={user ? handleClearData : null} 
         onLogout={user ? handleLogout : null} 
         fileName={fileName} 
+        onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)} // True = Silent!
       />
+      
       <main style={{ flex: 1 }}>
         {!analysisData
           ? <UploadPage 
               onAnalysisComplete={handleAnalysisComplete} 
-              userId={user.uid} // Pass the permanent Firebase UID
+              userId={user.uid} 
               lastFmUser={lastFmUser} 
               onSaveLastFm={handleSaveLastFm} 
             />
-          : <DashboardPage data={analysisData} />
+          : <DashboardPage 
+              data={analysisData} 
+              onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)} 
+            />
         }
       </main>
+      
     </div>
   )
 }

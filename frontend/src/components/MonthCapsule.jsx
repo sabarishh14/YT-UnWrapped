@@ -1,4 +1,5 @@
 import React from 'react'
+import { auth } from '../firebase.js' /* <-- NEW: Grab the current user */
 import styles from './MonthCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 
@@ -111,18 +112,49 @@ function TimeBreakdown({ weekly, dow, hours }) {
   )
 }
 
-function HistorySection({ history }) {
+function HistorySection({ history, onRefresh }) {
   const [expanded, setExpanded] = React.useState(false)
-  const visible = expanded ? history : history?.slice(0, 50)
+  const [hiddenIds, setHiddenIds] = React.useState(new Set()) // Track hidden songs instantly
+
+  const handleHideTrack = async (e, video_id) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    // 1. Optimistic UI: Instantly vanish the row from the screen
+    setHiddenIds(prev => new Set(prev).add(video_id))
+
+    const user_id = auth.currentUser?.uid
+    if (!user_id) return
+
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || ''}/api/hide_track`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id, video_id })
+      })
+      
+      // 2. Tell the Navbar to update the hidden list!
+      window.dispatchEvent(new Event('trackHidden'));
+
+      // 3. Silently update the Dashboard Playtime/Top Artists
+      if (onRefresh) onRefresh()
+
+    } catch (err) {
+      console.error("Failed to hide track:", err)
+    }
+  }
+
+  // Filter out the hidden tracks before we render the list
+  const activeHistory = (history || []).filter(item => !hiddenIds.has(item.video_id))
+  const visible = expanded ? activeHistory : activeHistory.slice(0, 50)
 
   return (
     <div className={styles.section}>
       <div className={styles.historyHeader}>
         <div className={styles.sectionLabel}>Full History</div>
-        <span className={styles.historyCount}>{history?.length?.toLocaleString()} plays</span>
+        <span className={styles.historyCount}>{activeHistory.length.toLocaleString()} plays</span>
       </div>
 
-      {/* NEW: Scrollable Wrapper */}
       <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '12px' }}>
         <div className={styles.historyTable} style={{ minWidth: '600px' }}>
           
@@ -132,42 +164,57 @@ function HistorySection({ history }) {
             <span>Artist</span>
             <span>Album</span>
           </div>
-        <div className={styles.historyBody}>
-          {(visible || []).map((item, i) => (
-            <a
-              key={i}
-              className={styles.historyRow}
-              href={`https://music.youtube.com/watch?v=${item.video_id}`}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span className={styles.historyIdx}>{i + 1}</span>
-              <div className={styles.historySongCol}>
-                {item.image ? (
-                  <img src={item.image} alt="Album Art" className={styles.historyImage} loading="lazy" />
-                ) : (
-                  <div className={styles.historyImageFallback}>🎵</div>
-                )}
-                <span className={styles.historyTitle} title={item.title}>{item.title}</span>
-              </div>
-              <span className={styles.historyArtist} title={item.artist}>{item.artist}</span>
-              <span className={styles.historyAlbum} title={item.album}>{item.album || '-'}</span>
-            </a>
-          ))}
+          
+          <div className={styles.historyBody}>
+            {(visible || []).map((item, i) => (
+              <a
+                // CRITICAL FIX: A stable key stops React from redrawing 500 rows at once!
+                key={`${item.video_id}-${item.played_at}`} 
+                className={styles.historyRow}
+                href={`https://music.youtube.com/watch?v=${item.video_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className={styles.historyIdx}>{i + 1}</span>
+                <div className={styles.historySongCol}>
+                  {item.image ? (
+                    <img src={item.image} alt="Album Art" className={styles.historyImage} loading="lazy" />
+                  ) : (
+                    <div className={styles.historyImageFallback}>🎵</div>
+                  )}
+                  <span className={styles.historyTitle} title={item.title}>{item.title}</span>
+                </div>
+                <span className={styles.historyArtist} title={item.artist}>{item.artist}</span>
+                <span className={styles.historyAlbum} title={item.album}>{item.album || '-'}</span>
+                
+                {/* --- WIRED UP: Hide Track Button --- */}
+                <button 
+                  className={styles.hideBtn} 
+                  onClick={(e) => handleHideTrack(e, item.video_id)}
+                  title="Hide this track from your stats"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+                  </svg>
+                </button>
+
+              </a>
+            ))}
+          </div>
         </div>
       </div>
-      </div>
 
-      {history?.length > 50 && (
+      {activeHistory.length > 50 && (
         <button className={styles.showMore} onClick={() => setExpanded(e => !e)}>
-          {expanded ? 'Show less' : `Show all ${history.length.toLocaleString()} plays`}
+          {expanded ? 'Show less' : `Show all ${activeHistory.length.toLocaleString()} plays`}
         </button>
       )}
     </div>
   )
 }
 
-export default function MonthCapsule({ data, monthLabel }) {
+export default function MonthCapsule({ data, monthLabel, onRefresh }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
   const posterRef = React.useRef(null) // <--- ADD THIS
@@ -480,7 +527,7 @@ export default function MonthCapsule({ data, monthLabel }) {
 
       {/* ── 4. Full History (RESTORED!) ── */}
       <div style={{ marginTop: '32px' }}>
-        <HistorySection history={history} />
+        <HistorySection history={history} onRefresh={onRefresh} />
       </div>
 
       {/* ── Artist detail drawer ── */}
