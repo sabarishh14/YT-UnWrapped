@@ -1,4 +1,5 @@
-import { useState, useEffect, startTransition } from 'react' // <--- Add startTransitionimport UploadPage from './pages/UploadPage.jsx'
+import { useState, useEffect, startTransition } from 'react' // <--- Add startTransition
+import UploadPage from './pages/UploadPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
 import { auth, loginWithGoogle, logout } from './firebase.js'
@@ -59,8 +60,6 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
       
       if (currentUser) {
         setIsFetchingCloud(true); // Show loading briefly while checking cache
@@ -93,7 +92,6 @@ export default function App() {
         setFileName('');
         setIsInitializing(false);
       }
-    });
     });
 
     return () => unsubscribe();
