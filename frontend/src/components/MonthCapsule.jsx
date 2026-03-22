@@ -2,6 +2,7 @@ import React from 'react'
 import { auth } from '../firebase.js' /* <-- NEW: Grab the current user */
 import styles from './MonthCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
+import StoryMode from './StoryMode.jsx';
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -221,6 +222,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
   const posterRef = React.useRef(null) 
+  const [showStory, setShowStory] = React.useState(false); // <--- Add this!
   
   // States for BOTH buttons
   const [isDownloading, setIsDownloading] = React.useState(false)
@@ -411,22 +413,42 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
         </div>
       </div>
     <div className={styles.capsuleWrapper}>
-      {/* We wrap the content in a div with the ref, so the snapshot only captures the stats, not the whole page background */}
+      
+      {/* ── Render Story Mode ── */}
+      {showStory && (
+        <StoryMode 
+          data={{ 
+            ...data, 
+            summary: { 
+              unique_artists: uniqueArtistsCount, 
+              unique_songs: uniqueSongsCount 
+            } 
+          }} 
+          monthLabel={monthLabel} 
+          onClose={() => setShowStory(false)} 
+        />
+      )}
+      
       <div className={styles.capsule} style={{ padding: '24px' }}>
         
-        {/* ── NEW: Snapshot Header (Only visible during screenshot!) ── */}
-        {isDownloading && (
-          <div className={styles.snapshotHeader}>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="12" fill="#FF0000"/>
-              <circle cx="12" cy="12" r="4.5" fill="white"/>
-              <circle cx="12" cy="12" r="2" fill="#FF0000"/>
-            </svg>
-            <h2 className={styles.snapshotTitle}>{monthLabel} Unwrapped</h2>
-          </div>
+        {/* ── Play Story Button (Hidden from friends to keep it exclusive!) ── */}
+        {!isReadOnly && (
+          <button 
+            onClick={() => setShowStory(true)}
+            style={{
+              width: '100%', marginBottom: '24px', padding: '16px', borderRadius: '16px',
+              background: 'linear-gradient(90deg, #FF0000 0%, #ff4444 100%)',
+              color: 'white', fontSize: '18px', fontWeight: '800', border: 'none',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              boxShadow: '0 8px 24px rgba(255, 0, 0, 0.3)'
+            }}
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            Play {monthLabel} Story
+          </button>
         )}
 
-        {/* ── 1. Immersive Story Hero ── */}
+        {/* ── 1. Immersive Story Hero (Your existing code continues here...) ── */}
         <div className={styles.storySection}>
           {/* Playtime Poster */}
           <div className={styles.storyCard}>

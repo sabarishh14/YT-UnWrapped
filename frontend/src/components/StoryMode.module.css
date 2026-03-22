@@ -1,0 +1,140 @@
+/* ── Full Screen Overlay ── */
+.storyOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  font-family: var(--font-main);
+}
+
+.storyContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  max-width: 480px; /* Constrains it to a phone-sized ratio on desktop */
+  background: #111;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 50px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+/* ── Progress Bars ── */
+.progressRow {
+  position: absolute;
+  top: 16px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+.progressBar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: #fff;
+  width: 0%;
+  border-radius: 4px;
+}
+
+.progressActive { animation: fillBar 10s linear forwards; }
+.progressDone { width: 100%; }
+
+@keyframes fillBar {
+  from { width: 0%; }
+  to { width: 100%; }
+}
+
+/* ── The Fixed Background Layer ── */
+.storyBackground {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Interaction Zones ── */
+.tapLeft {
+  position: absolute;
+  top: 0; left: 0; bottom: 0; width: 35%;
+  z-index: 5;
+  cursor: pointer;
+}
+.tapRight {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; width: 65%;
+  z-index: 5;
+  cursor: pointer;
+}
+
+.closeBtn {
+  position: absolute;
+  top: 32px; right: 16px;
+  color: white;
+  z-index: 10;
+  padding: 8px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 50%;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ── Typography & Layout ── */
+.slideContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px;
+  position: relative;
+  z-index: 2;
+}
+
+.preTitle {
+  font-size: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,0.7);
+  margin-bottom: 24px;
+}
+
+.massiveText {
+  font-size: clamp(48px, 10vw, 72px);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  color: white;
+  margin-bottom: 16px;
+}
+
+.highlight {
+  color: var(--yt-red);
+  display: block;
+}
+
+.subText {
+  font-size: 20px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.9);
+  line-height: 1.4;
+}
+
+/* ── Dynamic Backgrounds ── */
+.bgTime { background: radial-gradient(circle at 50% 0%, #4a0000 0%, #050000 100%); }
+.bgArtist { background: radial-gradient(circle at 100% 100%, #3b0066 0%, #050505 100%); }
+.bgSongs { background: radial-gradient(circle at 0% 100%, #992200 0%, #080808 100%); }
+.bgDiscovery { background: radial-gradient(circle at 50% 50%, #002244 0%, #000000 100%); }
