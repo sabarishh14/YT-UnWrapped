@@ -402,17 +402,56 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     except Exception as e:
         app.logger.warning(f"[YTMusicAPI] Exception for '{clean_title}': {e}")
 
-    # Fallback to Last.fm
-    lfm_meta = lookup_metadata_lastfm(clean_title, channel_artist)
-    if lfm_meta:
-        ARTIST_CACHE[title] = lfm_meta
-        return lfm_meta
+    if not best_match:
+        lfm_meta = lookup_metadata_lastfm(clean_title, channel_artist)
+        if lfm_meta:
+            meta = lfm_meta
+        else:
+            # Ultimate Fallback
+            fallback = channel_artist if not is_junk(channel_artist) else "Unknown Artist"
+            meta = {"artist": fallback, "image": None}
 
-    # Ultimate Fallback
-    fallback = channel_artist if not is_junk(channel_artist) else "Unknown Artist"
-    meta_fallback = {"artist": fallback}
-    ARTIST_CACHE[title] = meta_fallback
-    return meta_fallback
+    # 🚀 THE MASTER THUMBNAIL INJECTOR 🚀
+    # If we made it this far and STILL don't have an image, force Saavn to find one!
+    if not meta.get("image"):
+        print(f"\n🖼️ Image missing for '{clean_title}'. Booting up Saavn Injector...")
+        saavn_img = fetch_saavn_thumbnail(clean_title, channel_artist)
+        if saavn_img:
+            print(f"   ✅ SUCCESS! Saavn found the cover: {saavn_img}")
+            meta["image"] = saavn_img
+        else:
+            print(f"   ❌ FAILED! Saavn couldn't find a cover either.")
+
+    # Save to Database and Return
+    ARTIST_CACHE[title] = meta
+    return meta
+
+def fetch_saavn_thumbnail(title: str, context: str) -> str:
+    """Fetches ONLY the 50x50 thumbnail from the Saavn Sumit API."""
+    try:
+        query = f"{title} {context}".strip() if not is_junk(context) else title
+        print(f"   🔍 Searching Saavn API for: {query}") # <--- DEBUG LOG
+        
+        resp = requests.get(
+            "https://saavn.sumit.co/api/search/songs",
+            params={"query": query},
+            timeout=5
+        )
+        if resp.ok:
+            data = resp.json()
+            if data.get("success") and data.get("data", {}).get("results"):
+                images = data["data"]["results"][0].get("image", [])
+                if images:
+                    for img in images:
+                        if "50x50" in img.get("quality", ""):
+                            return img.get("url") or img.get("link")
+                    return images[0].get("url") or images[0].get("link")
+            else:
+                print("   ❌ Saavn API returned success: false or no results.")
+    except Exception as e:
+        print(f"   ⚠️ Saavn API Exception: {e}")
+        
+    return None
 
 def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
     if not LASTFM_API_KEY:
@@ -437,21 +476,19 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
                 if tracks:
                     match = tracks[0]
                     artist = match.get("artist", "").strip()
+                    
                     if artist and not is_junk(artist):
-                        images = match.get("image", [])
-                        image_url = None
-                        if images and isinstance(images, list):
-                            # Grab the largest available image from the array
-                            image_url = images[-1].get("#text")
+                        # --- NEW: Safely inject the Saavn 50x50 thumbnail! ---
+                        image_url = fetch_saavn_thumbnail(title, channel_artist)
                         
                         app.logger.info(f"[LastFM] Found fallback for '{title}' → {artist}")
                         return {
                             "artist": artist,
                             "saavn_name": match.get("name"),
-                            "album": None, # track.search doesn't return album info
+                            "album": None, 
                             "duration": None, 
-                            "image": image_url if image_url else None
-                        }
+                            "image": None # <--- Let the Master Injector handle this! 
+                       }
         except Exception as e:
             app.logger.warning(f"[LastFM] Exception for '{title}': {e}")
             
