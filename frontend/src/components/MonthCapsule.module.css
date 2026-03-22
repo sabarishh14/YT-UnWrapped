@@ -1231,6 +1231,7 @@
   font-weight: 800;
   color: #666;
   width: 40px;
+  flex-shrink: 0; /* Prevents long text from squishing the number to the left */
 }
 
 .posterName {

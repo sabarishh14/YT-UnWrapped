@@ -275,13 +275,34 @@ export default function MonthCapsule({ data, monthLabel }) {
             <h1 className={styles.posterTitle}>{monthLabel}</h1>
           </div>
 
-          <div className={styles.posterHero}>
-            <p style={{ fontSize: '32px', color: '#ffb3b3', margin: 0 }}>Total Playtime</p>
-            <h2 style={{ fontSize: '120px', fontWeight: 900, margin: 0, color: 'white', lineHeight: '1' }}>
-              {Math.round(total_minutes).toLocaleString()} <span style={{ fontSize: '40px', color: '#888' }}>mins</span>
-            </h2>
-          </div>
+<div className={styles.posterHero} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', width: '100%' }}>
+            
+            {/* Column 1: Total Playtime */}
+            <div style={{ flex: 1 }}>
+              <p style={{ fontSize: '20px', color: '#ffb3b3', margin: 0, paddingBottom: '8px', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 700 }}>Total Playtime</p>
+              <h2 style={{ fontSize: '72px', fontWeight: 900, margin: 0, color: 'white', lineHeight: '1', letterSpacing: '-1px', whiteSpace: 'nowrap' }}>
+                {Math.round(total_minutes).toLocaleString()} <span style={{ fontSize: '24px', color: '#888', fontWeight: 600, letterSpacing: '0' }}>mins</span>
+              </h2>
+            </div>
 
+            {/* Column 2: Unique Artists */}
+            <div style={{ flex: 1, borderLeft: '2px solid rgba(255, 255, 255, 0.1)', paddingLeft: '40px', marginLeft: '20px' }}>
+              <p style={{ fontSize: '20px', color: '#ffb3b3', margin: 0, paddingBottom: '8px', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 700 }}>Unique Artists</p>
+              <h2 style={{ fontSize: '72px', fontWeight: 900, margin: 0, color: 'white', lineHeight: '1', letterSpacing: '-1px', whiteSpace: 'nowrap' }}>
+                {uniqueArtistsCount.toLocaleString()}
+              </h2>
+            </div>
+            
+            {/* Column 3: Unique Songs */}
+            <div style={{ flex: 1, borderLeft: '2px solid rgba(255, 255, 255, 0.1)', paddingLeft: '40px', marginLeft: '20px' }}>
+              <p style={{ fontSize: '20px', color: '#ffb3b3', margin: 0, paddingBottom: '8px', textTransform: 'uppercase', letterSpacing: '2px', fontWeight: 700 }}>Unique Songs</p>
+              <h2 style={{ fontSize: '72px', fontWeight: 900, margin: 0, color: 'white', lineHeight: '1', letterSpacing: '-1px', whiteSpace: 'nowrap' }}>
+                {uniqueSongsCount.toLocaleString()}
+              </h2>
+            </div>
+
+          </div>
+          
           <div className={styles.posterGrid}>
             <div className={styles.posterCard}>
               <h3 className={styles.posterCardTitle}>Top Artists</h3>
@@ -314,9 +335,10 @@ export default function MonthCapsule({ data, monthLabel }) {
                 ) : (
                   <div key={i} className={styles.posterRow}>
                     <span className={styles.posterNum}>{i + 1}</span>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                       <span className={styles.posterName}>{s.name}</span>
-                      <span style={{ fontSize: '20px', color: '#888' }}>{s.artist}</span>
+                      {/* Removed truncation, added line-height so wrapped text looks clean */}
+                      <span style={{ fontSize: '20px', color: '#888', lineHeight: '1.3', marginTop: '4px' }}>{s.artist}</span>
                     </div>
                   </div>
                 )
