@@ -830,47 +830,53 @@
     overflow-x: auto;
     overflow-y: hidden;
     scroll-snap-type: x mandatory; 
+    scroll-padding-left: 5vw; /* CRITICAL: Snaps the cards perfectly to the left margin */
     gap: 16px;
-    padding-bottom: 16px; 
+    padding-bottom: 20px; 
     
     margin-left: -5vw;
     margin-right: -5vw;
     padding-left: 5vw;
-    padding-right: 5vw;
+    padding-right: 20vw; /* CRITICAL: Lets the last card slide all the way to the left */
     
-    /* Remove the mask-image stuff completely */
-    -webkit-overflow-scrolling: touch; /* Helps mobile interpret it as scrollable */
+    -webkit-overflow-scrolling: touch;
   }
   
-  /* ── Custom Glowing Mobile Scrollbar (Forced) ── */
+  /* ── Elegant Mobile Scrollbar ── */
   .rankingsGrid::-webkit-scrollbar,
   .patternsGrid::-webkit-scrollbar {
     display: block !important; 
-    height: 8px !important;
+    height: 4px !important; /* Thinner, cleaner slider rail */
     -webkit-appearance: none !important;
   }
 
   .rankingsGrid::-webkit-scrollbar-track,
   .patternsGrid::-webkit-scrollbar-track {
-    /* Make the track completely invisible so there is no ugly grey background pill */
-    background: transparent !important; 
+    background: rgba(255, 255, 255, 0.08) !important; /* Visible track draws attention to horizontal movement */
     margin: 0 5vw !important; 
+    border-radius: 4px;
   }
 
   .rankingsGrid::-webkit-scrollbar-thumb,
   .patternsGrid::-webkit-scrollbar-thumb {
     background-color: var(--yt-red) !important; 
-    border-radius: 20px !important;
-    /* Removed the black border since the track is now invisible */
+    border-radius: 4px !important;
   }
 
-  /* Make each card take up 85% of the screen so they hint at the next swipeable card */
+  /* Make cards narrower and snap to start so the next card heavily "peeks" in from the right */
   .rankingsGrid > div, 
   .patternsGrid > div {
-    width: 85vw;        /* Lock the width */
-    max-width: 85vw;    /* Prevent flexbox from stretching it for long text */
+    width: 78vw;
+    max-width: 78vw;
     flex-shrink: 0;
-    scroll-snap-align: center;
+    scroll-snap-align: start;
+    /* Horizontal entry animation pulls the user's eye to the scroll axis */
+    animation: slideLeftFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  }
+
+  @keyframes slideLeftFade {
+    from { opacity: 0; transform: translateX(60px); }
+    to { opacity: 1; transform: translateX(0); }
   }
   
   /* 3. History Table Mobile Cleanup */
@@ -884,17 +890,7 @@
   .historyArtist,
   .historyAlbum { display: none; }
 
-  /* ── Mobile UI Hint (Tells users to swipe!) ── */
-  .sectionLabel::after {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-    font-weight: 500;
-    margin-left: 8px;
-    letter-spacing: 0;
-  }
-
   /* ── Snapshot Mode Overrides ── */
-  /* When taking a screenshot on a phone, bypass the swipe container and stack everything vertically to capture all data! */
   .snapshotMode .rankingsGrid,
   .snapshotMode .patternsGrid {
     display: grid !important;
@@ -910,11 +906,7 @@
     min-width: 0 !important;
     width: 100% !important;
     max-width: none !important;
-  }
-  
-  /* Hide the swipe hint from the final downloaded image */
-  .snapshotMode .sectionLabel::after {
-    display: none !important;
+    animation: none !important;
   }
 }
 
