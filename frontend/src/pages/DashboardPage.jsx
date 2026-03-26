@@ -88,6 +88,12 @@ export default function DashboardPage({ data, onRefresh }) {
           />
         </div>
       )}
+
+      {/* NEW: SB Creations Copyright Footer */}
+      <div style={{ textAlign: 'center', marginTop: '40px', color: '#666', fontSize: '13px', fontWeight: '500', letterSpacing: '1px' }}>
+        © {new Date().getFullYear()} SB Creations. All rights reserved.
+      </div>
+      
     </div>
   )
 }

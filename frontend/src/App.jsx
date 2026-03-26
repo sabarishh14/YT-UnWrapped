@@ -11,12 +11,13 @@ const API_BASE = import.meta.env.VITE_API_URL || "";
 export default function App() {
   const [analysisData, setAnalysisData] = useState(null)
   const [fileName, setFileName] = useState('')
-  const [user, setUser] = useState(null) // Holds the Firebase user
+  const [user, setUser] = useState(null) 
   const [lastFmUser, setLastFmUser] = useState(null)
   const [isInitializing, setIsInitializing] = useState(true)
-  const [isFetchingCloud, setIsFetchingCloud] = useState(false) // <-- ADDED THIS
+  const [isFetchingCloud, setIsFetchingCloud] = useState(false)
+  const [progressMsg, setProgressMsg] = useState('') // The one we just added
 
-  // Hash Routing State
+  // ── THE MISSING HASH STATE (Make sure this is here!) ──
   const [hash, setHash] = useState(window.location.hash);
 
   useEffect(() => {
@@ -24,6 +25,44 @@ export default function App() {
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
+  // ──────────────────────────────────────────────────────
+
+  // --- NEW: Global Progress Polling Effect ---
+  useEffect(() => {
+    let pollId;
+    if (isFetchingCloud && user) {
+      const startTime = Date.now();
+      pollId = setInterval(async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/progress?user_id=${user.uid}`);
+          const data = await res.json();
+          if (data.total > 0 && data.processed > 0) {
+            const elapsedSec = (Date.now() - startTime) / 1000;
+            const tracksPerSec = data.processed / elapsedSec;
+            const remainingTracks = data.total - data.processed;
+            const remainingSec = Math.round(remainingTracks / tracksPerSec);
+
+            let etaStr = '';
+            if (remainingSec > 60) {
+              etaStr = `~${Math.floor(remainingSec / 60)}m ${remainingSec % 60}s remaining`;
+            } else if (remainingSec > 0) {
+              etaStr = `~${remainingSec}s remaining`;
+            } else {
+              etaStr = 'Almost done...';
+            }
+            setProgressMsg(`${data.message}\n(${data.processed} / ${data.total} tracks)\n${etaStr}`);
+          } else if (data.total > 0) {
+            setProgressMsg(`${data.message}\n(0 / ${data.total} tracks)\nCalculating time...`);
+          } else {
+            setProgressMsg(data.message);
+          }
+        } catch (err) {}
+      }, 1000);
+    } else {
+      setProgressMsg('');
+    }
+    return () => clearInterval(pollId);
+  }, [isFetchingCloud, user]);
 
   // The Silent Refresh Engine
   const fetchCloudData = (uid, lfm, silent = false) => {
@@ -151,11 +190,40 @@ export default function App() {
   }
   
   if (isInitializing || isFetchingCloud) {
+    const msgParts = progressMsg.split('\n');
+    const mainText = msgParts[0] || (isFetchingCloud ? "Syncing your history..." : "Starting up...");
+    const progressText = msgParts[1] || '';
+    const etaText = msgParts[2] || '';
+
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', gap: '16px' }}>
-        <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,0,0,0.2)', borderTopColor: '#FF0000', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        <p>{isFetchingCloud ? "Pulling your Unwrapped from the cloud..." : "Starting up..."}</p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#030303', backdropFilter: 'blur(20px)', overflow: 'hidden' }}>
+        {/* Ambient Orb */}
+        <div style={{ position: 'absolute', width: '70vw', height: '70vh', background: 'radial-gradient(circle, rgba(255, 0, 0, 0.2) 0%, transparent 65%)', filter: 'blur(90px)', pointerEvents: 'none', animation: 'pulseOrbApp 4s ease-in-out infinite alternate' }} />
+        
+        {/* Content */}
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '36px' }}>
+          <div style={{ animation: 'floatApp 3s ease-in-out infinite', filter: 'drop-shadow(0 0 30px rgba(255, 0, 0, 0.3))' }}>
+            <svg width="80" height="80" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="28" fill="#FF0000" opacity="0.12"/>
+              <circle cx="28" cy="28" r="20" fill="#FF0000" opacity="0.18"/>
+              <circle cx="28" cy="28" r="13" fill="#FF0000"/>
+              <circle cx="28" cy="28" r="5.5" fill="white"/>
+              <circle cx="28" cy="28" r="2.5" fill="#FF0000"/>
+            </svg>
+          </div>
+          <h2 style={{ fontSize: 'clamp(32px, 6vw, 48px)', fontWeight: 800, letterSpacing: '-1.5px', background: 'linear-gradient(90deg, #ffffff 20%, #ffb3b3 40%, #ff3333 60%, #ffffff 80%)', backgroundSize: '200% auto', color: 'white', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', animation: 'shineApp 3s linear infinite', padding: '0 10px' }}>
+            {mainText}
+          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {progressText && <p style={{ fontFamily: 'monospace', fontSize: '16px', color: '#aaa', letterSpacing: '1.5px' }}>{progressText}</p>}
+            {etaText && <p style={{ fontSize: '20px', fontWeight: 600, color: '#ff3333', letterSpacing: '-0.5px', textShadow: '0 0 20px rgba(255, 0, 0, 0.4)' }}>{etaText}</p>}
+          </div>
+        </div>
+        <style>{`
+          @keyframes pulseOrbApp { 0% { transform: scale(0.8) translateY(5%); opacity: 0.6; } 100% { transform: scale(1.2) translateY(-5%); opacity: 1; } }
+          @keyframes floatApp { 0%, 100% { transform: translateY(0) scale(1); filter: drop-shadow(0 0 30px rgba(255, 0, 0, 0.3)); } 50% { transform: translateY(-12px) scale(1.05); filter: drop-shadow(0 0 50px rgba(255, 0, 0, 0.6)); } }
+          @keyframes shineApp { to { background-position: 200% center; } }
+        `}</style>
       </div>
     )
   }
@@ -289,7 +357,7 @@ export default function App() {
         onClear={user ? handleClearData : null} 
         onLogout={user ? handleLogout : null} 
         fileName={fileName} 
-        onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)} // True = Silent!
+        onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, false)} // <--- CHANGED FROM TRUE TO FALSE
       />
       
       <main style={{ flex: 1 }}>

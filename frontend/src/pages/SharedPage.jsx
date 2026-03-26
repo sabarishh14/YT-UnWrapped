@@ -46,7 +46,8 @@ export default function SharedPage({ token }) {
           <h1 style={{ fontSize: 'clamp(28px, 5vw, 42px)', fontWeight: '800', color: 'white', letterSpacing: '-1px', marginBottom: '8px' }}>
             {sharedData.month_label} Unwrapped
           </h1>
-          <p style={{ color: '#aaa', fontSize: '15px' }}>Shared by a friend • YT Music Unwrapped</p>
+          {/* NEW: Displays the user's actual name */}
+          <p style={{ color: '#aaa', fontSize: '15px' }}>Shared by {sharedData.dashboard_data.shared_by || "a friend"} • YT Music Unwrapped</p>
         </div>
 
         {/* We pass isReadOnly=true to disable the "Hide Track" and "Share" buttons! */}
@@ -55,6 +56,11 @@ export default function SharedPage({ token }) {
           monthLabel={sharedData.month_label} 
           isReadOnly={true} 
         />
+        
+        {/* NEW: SB Creations Copyright Footer */}
+        <div style={{ textAlign: 'center', marginTop: '60px', paddingBottom: '20px', color: '#666', fontSize: '13px', fontWeight: '500', letterSpacing: '1px' }}>
+          © {new Date().getFullYear()} SB Creations. All rights reserved.
+        </div>
       </div>
     </div>
   );

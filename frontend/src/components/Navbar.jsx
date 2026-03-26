@@ -103,12 +103,25 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
           
           <div className={styles.modalBody}>
             
-            {/* 1. Cloud Sync Section */}
+            {/* 1. User Profile & Cloud Sync Section */}
             <div className={styles.settingsSection} style={{ marginBottom: '16px' }}>
+              
+              {/* NEW: Firebase Profile Display */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                {auth.currentUser?.photoURL ? (
+                  <img src={auth.currentUser.photoURL} alt="Profile" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />
+                ) : (
+                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)' }} />
+                )}
+                <div>
+                  <p style={{ margin: 0, color: '#fff', fontSize: '16px', fontWeight: '600' }}>{auth.currentUser?.displayName || 'Music Lover'}</p>
+                  <p style={{ margin: 0, color: '#aaa', fontSize: '13px' }}>{auth.currentUser?.email}</p>
+                </div>
+              </div>
+
               <h3>Cloud Sync</h3>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  {/* Fake Last.fm Red Badge */}
                   <div style={{ width: '32px', height: '32px', background: '#d51007', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '14px' }}>
                     fm
                   </div>
@@ -117,10 +130,21 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
                     <p style={{ margin: '2px 0 0 0', color: '#aaa', fontSize: '13px' }}>Scrobbling active</p>
                   </div>
                 </div>
-                {/* Active Status Pill */}
-                <span style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(74, 222, 128, 0.2)' }}>
-                  Connected
-                </span>
+                
+                {/* NEW: Sync Now Button added next to Connected badge */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
+                  <span style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(74, 222, 128, 0.2)' }}>
+                    Connected
+                  </span>
+                  <button 
+                    onClick={() => { if(onRefresh) onRefresh(); setIsSettingsOpen(false); }} 
+                    style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
+                    onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                    onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                  >
+                    Sync Now
+                  </button>
+                </div>
               </div>
 
               {/* --- NEW: Moved File Name / Last Sync Date Here --- */}

@@ -273,7 +273,12 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/publish_link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id, month_label: monthLabel, dashboard_data: data })
+        body: JSON.stringify({ 
+          user_id, 
+          month_label: monthLabel, 
+          // Inject the user's name straight into the dashboard data payload!
+          dashboard_data: { ...data, shared_by: auth.currentUser?.displayName || "A friend" } 
+        })
       });
       
       const resData = await response.json();
@@ -409,7 +414,12 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
             </div>
           </div>
 
-          <div className={styles.posterFooter}>YT Music Unwrapped</div>
+          <div className={styles.posterFooter}>
+            <div>YT Music Unwrapped</div>
+            <div style={{ fontSize: '20px', color: '#555', marginTop: '12px', fontWeight: '500', letterSpacing: '2px' }}>
+              © {new Date().getFullYear()} SB Creations
+            </div>
+          </div>
         </div>
       </div>
     <div className={styles.capsuleWrapper}>
