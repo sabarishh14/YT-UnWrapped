@@ -1,6 +1,6 @@
-# YT Music Stats
+# YT Music Unwrapped - Your Stats, Cinematic 🎬
 
-A YouTube Music listening stats dashboard — upload your Google Takeout history and get monthly analytics.
+A high-performance React and Flask application that parses massive YouTube Music listening histories to generate immersive, shareable dashboards. Built with a Stale-While-Revalidate (SWR) cache in Supabase/Neon, multi-tier fallback metadata enrichment (Last.fm & JioSaavn), native-feeling swipeable 'Story Mode' transitions, and instant 9:16 exportable posters — protected by Firebase Auth and custom hash-routed sandboxing.
 
 ## Features
 - **Month Capsule**: Total playtime, Top 5 Artists (by minutes), Top 5 Songs (by plays), Streak, Listening Split, and Throwback
