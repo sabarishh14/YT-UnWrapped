@@ -843,10 +843,13 @@ def compute_full_history(records, durations):
 
 # ── Routes ───────────────────────────────────────────────
 
+API_VERSION = "1.1.0 (Compare & Year Wrapped Update)"
+
 @app.route("/", methods=["GET"])
 def index():
     return jsonify({
         "status": "online", 
+        "version": API_VERSION,
         "message": "YT Music Unwrapped API is running smoothly!"
     })
 
