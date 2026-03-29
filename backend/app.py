@@ -306,23 +306,31 @@ def get_durations(video_ids):
 
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
-        return ARTIST_CACHE[title]
+        cached = ARTIST_CACHE[title]
+        # If the cached entry already has a thumbnail, return it immediately
+        # Otherwise, treat it as incomplete and re-fetch
+        if cached.get("image"):
+            return cached
 
     clean_title = re.sub(r'(?i)\(.*?lyrical.*?\)|\[.*?official.*?\]|\(.*?audio.*?\]|\(feat\..*?\)', '', title)
     clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', clean_title).strip()
 
-    try:    
-        best_match = None
-        
-        # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
-        if video_id and not str(video_id).startswith("lfm_"):
+    best_match = None
+    meta = None
+
+    # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
+    if video_id and not str(video_id).startswith("lfm_"):
+        try:
             watch_playlist = ytmusic.get_watch_playlist(videoId=video_id)
             tracks = watch_playlist.get("tracks", [])
             if tracks:
                 best_match = tracks[0]
-        
-        # 2. If it's a Last.fm record, fallback to a text Search
-        if not best_match:
+        except Exception as e:
+            app.logger.warning(f"[YTMusicAPI] get_watch_playlist failed for '{video_id}': {e}")
+    
+    # 2. If video ID lookup failed or returned nothing, fallback to text Search
+    if not best_match:
+        try:
             search_query = f"{clean_title} {channel_artist}".strip() if not is_junk(channel_artist) else clean_title
             
             # Attempt 1: Strict "songs" search
@@ -349,60 +357,59 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
                     best_match = potential_match
                 else:
                     app.logger.warning(f"Rejected false match: {clean_title} -> {found_title}")
+        except Exception as e:
+            app.logger.warning(f"[YTMusicAPI] Search failed for '{clean_title}': {e}")
 
-        if best_match:
-            artists = [a['name'] for a in best_match.get('artists', [])]
-            
-            # --- NEW: Extract Music Directors and block junk like "Various Artists" ---
-            music_directors = []
-            album_info = best_match.get('album')
-            if album_info and album_info.get('id'):
-                try:
-                    full_album = ytmusic.get_album(album_info['id'])
-                    album_artists = [a['name'] for a in full_album.get('artists', [])]
-                    
-                    existing_lower = [a.lower() for a in artists]
-                    for aa in album_artists:
-                        if not is_junk(aa): # Blocks "Various Artists", "Release", etc.
-                            music_directors.append(aa)
-                            if aa.lower() not in existing_lower:
-                                artists.append(aa)
-                except Exception as e:
-                    app.logger.warning(f"Could not fetch album info for '{clean_title}': {e}")
-            
-            # Fallback: if no album info, assume the channel artist is the director (if valid)
-            if not music_directors and channel_artist and not is_junk(channel_artist):
-                music_directors.append(channel_artist)
+    if best_match:
+        artists = [a['name'] for a in best_match.get('artists', [])]
+        
+        # --- Extract Music Directors and block junk like "Various Artists" ---
+        music_directors = []
+        album_info = best_match.get('album')
+        if album_info and album_info.get('id'):
+            try:
+                full_album = ytmusic.get_album(album_info['id'])
+                album_artists = [a['name'] for a in full_album.get('artists', [])]
+                
+                existing_lower = [a.lower() for a in artists]
+                for aa in album_artists:
+                    if not is_junk(aa): # Blocks "Various Artists", "Release", etc.
+                        music_directors.append(aa)
+                        if aa.lower() not in existing_lower:
+                            artists.append(aa)
+            except Exception as e:
+                app.logger.warning(f"Could not fetch album info for '{clean_title}': {e}")
+        
+        # Fallback: if no album info, assume the channel artist is the director (if valid)
+        if not music_directors and channel_artist and not is_junk(channel_artist):
+            music_directors.append(channel_artist)
 
-            # FIX: Only use Takeout string if YT Music found zero artists
-            if not artists and channel_artist and not is_junk(channel_artist):
-                artists.append(channel_artist)
-                    
-            artist_str = ", ".join(artists) if artists else "Unknown Artist"
-            
-            images = best_match.get('thumbnails', [])
-            image_url = images[-1]['url'] if images else None
-            
-            duration = best_match.get('duration_seconds')
-            if duration is None and best_match.get('length'):
-                parts = best_match['length'].split(':')
-                duration = sum(int(x) * 60 ** i for i, x in enumerate(reversed(parts)))
-            
-            meta = {
-                "artist": artist_str,
-                "saavn_name": best_match.get('title', clean_title),
-                "album": album_info.get('name') if album_info else None,
-                "duration": duration,
-                "image": image_url,
-                "real_video_id": best_match.get('videoId'),
-                "music_directors": music_directors # <-- Save MDs separately!
-            }
-            ARTIST_CACHE[title] = meta
-            return meta
-    except Exception as e:
-        app.logger.warning(f"[YTMusicAPI] Exception for '{clean_title}': {e}")
+        # FIX: Only use Takeout string if YT Music found zero artists
+        if not artists and channel_artist and not is_junk(channel_artist):
+            artists.append(channel_artist)
+                
+        artist_str = ", ".join(artists) if artists else "Unknown Artist"
+        
+        images = best_match.get('thumbnails', [])
+        image_url = images[-1]['url'] if images else None
+        
+        duration = best_match.get('duration_seconds')
+        if duration is None and best_match.get('length'):
+            parts = best_match['length'].split(':')
+            duration = sum(int(x) * 60 ** i for i, x in enumerate(reversed(parts)))
+        
+        meta = {
+            "artist": artist_str,
+            "saavn_name": best_match.get('title', clean_title),
+            "album": album_info.get('name') if album_info else None,
+            "duration": duration,
+            "image": image_url,
+            "real_video_id": best_match.get('videoId'),
+            "music_directors": music_directors # <-- Save MDs separately!
+        }
 
-    if not best_match:
+    # If YT Music search found nothing, try Last.fm as metadata source
+    if not meta:
         lfm_meta = lookup_metadata_lastfm(clean_title, channel_artist)
         if lfm_meta:
             meta = lfm_meta
@@ -412,7 +419,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             meta = {"artist": fallback, "image": None}
 
     # 🚀 THE MASTER THUMBNAIL INJECTOR 🚀
-    # If we made it this far and STILL don't have an image, force Saavn to find one!
+    # If we STILL don't have an image, force Saavn to find one!
     if not meta.get("image"):
         print(f"\n🖼️ Image missing for '{clean_title}'. Booting up Saavn Injector...")
         saavn_img = fetch_saavn_thumbnail(clean_title, channel_artist)
@@ -500,7 +507,14 @@ def enrich_artists(records: list, user_id: str) -> None:
     # --------------------------------
     seen = {}
     for r in records:
-        if r["title"] not in ARTIST_CACHE and r["title"] not in seen:
+        cached_entry = ARTIST_CACHE.get(r["title"])
+        # Re-enrich if not cached at all, OR if cached but missing thumbnail
+        needs_enrichment = (
+            not cached_entry 
+            or not isinstance(cached_entry, dict) 
+            or not cached_entry.get("image")
+        )
+        if needs_enrichment and r["title"] not in seen:
             seen[r["title"]] = (r["artist"], r["video_id"])
 
     uncached = [(title, art, vid) for title, (art, vid) in seen.items()]
