@@ -133,6 +133,43 @@
   transform: translateY(-2px);
 }
 
+.yearWrappedBtn {
+  margin-top: 16px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.yearWrappedBtn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
+}
+
+.yearWrappedBtnActive {
+  margin-top: 16px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 800;
+  text-align: center;
+  color: white;
+  background: linear-gradient(90deg, #ff0000 0%, #ff4444 100%);
+  border: none;
+  box-shadow: 0 8px 24px rgba(255, 0, 0, 0.3);
+  transform: translateY(-2px);
+  cursor: pointer;
+}
+
 /* ── Capsule Section ── */
 .capsuleSection {
   display: flex;
@@ -200,4 +237,45 @@
   .lifetimeSub {
     font-size: 16px;
   }
+}
+
+/* ── Spinner ── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+}
+
+/* ── Compare Feature UI ── */
+.compareToggleBtn {
+  background: linear-gradient(135deg, rgba(230, 0, 0, 0.2), rgba(255, 60, 0, 0.2));
+  color: #ff9980;
+  border: 1px solid rgba(255, 60, 0, 0.4);
+  padding: 10px 20px;
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all var(--transition);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  box-shadow: 0 4px 16px rgba(255, 60, 0, 0.1);
+}
+
+.compareToggleBtn:hover {
+  background: linear-gradient(135deg, rgba(230, 0, 0, 0.3), rgba(255, 60, 0, 0.4));
+  border-color: rgba(255, 60, 0, 0.8);
+  color: white;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(255, 60, 0, 0.2);
 }

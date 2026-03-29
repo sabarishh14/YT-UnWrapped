@@ -805,6 +805,16 @@ def compute_weekly_breakdown(records, durations, year, month):
              "minutes": round(week_minutes[w], 1)}
             for w in sorted(week_minutes)]
 
+def compute_monthly_breakdown(records, durations, year):
+    month_minutes = defaultdict(float)
+    for r in records:
+        mo = r["timestamp"].month
+        month_minutes[mo] += durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60
+    
+    MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    return [{"month": m, "label": MONTH_NAMES[m - 1], "range": f"{year}", "minutes": round(month_minutes.get(m, 0), 1)}
+            for m in range(1, 13)]
+
 def compute_day_of_week(records, durations):
     DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
     day_m = defaultdict(float)
@@ -1040,11 +1050,15 @@ def analyze():
                 durations[vid] = DEFAULT_TRACK_DURATION
 
         months = defaultdict(list)
+        years = defaultdict(list)
         for r in records:
             months[r["year_month"]].append(r)
+            years[str(r["timestamp"].year)].append(r)
 
         months_sorted = sorted(months.keys())
+        years_sorted = sorted(years.keys())
         monthly_stats = {}
+        yearly_stats = {}
         
         # Cumulative trackers
         cumulative_plays = 0
@@ -1092,6 +1106,32 @@ def analyze():
                 "history":          compute_full_history(mrs, durations),
             }
 
+        for yk in years_sorted:
+            yrs = years[yk]
+            
+            yearly_plays = len(yrs)
+            yearly_minutes = sum(durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60 for r in yrs)
+            yearly_songs = set(r["video_id"] for r in yrs)
+            yearly_artists = set(r["artist"] for r in yrs)
+            
+            yearly_stats[yk] = {
+                "total_plays":      yearly_plays,
+                "total_minutes":    round(yearly_minutes, 1),
+                "unique_songs":     len(yearly_songs),
+                "unique_artists":   len(yearly_artists),
+                "days_active":      len(set(r["date"] for r in yrs)),
+                "top_artists":      compute_top_artists_by_minutes(yrs, durations),
+                "top_songs":        compute_top_songs_by_plays(yrs, durations),
+                "top_albums":       compute_top_albums_by_plays(yrs, durations),
+                "top_music_directors": compute_top_music_directors(yrs, durations),
+                "streak":           compute_streak(yrs),
+                "throwback":        None,
+                "monthly_breakdown": compute_monthly_breakdown(yrs, durations, y), 
+                "day_of_week":      compute_day_of_week(yrs, durations),
+                "hour_heatmap":     compute_hour_heatmap(yrs, durations),
+                "history":          compute_full_history(yrs, durations),
+            }
+
         # Clear the user's progress from memory to save RAM
         PROGRESS.pop(user_id, None)
 
@@ -1104,7 +1144,9 @@ def analyze():
        # --- NEW: Build the final payload, cache it, and return it ---
         response_payload = {
             "months_available": sorted(months.keys()),
+            "years_available":  sorted(years.keys()),
             "monthly_stats":    monthly_stats,
+            "yearly_stats":     yearly_stats,
             "summary": {
                 "total_plays":    len(records),
                 "unique_artists": len(set(r["artist"] for r in records)),

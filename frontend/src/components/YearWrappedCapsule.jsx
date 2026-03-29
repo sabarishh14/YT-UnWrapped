@@ -1,6 +1,6 @@
 import React from 'react'
 import { auth } from '../firebase.js' /* <-- NEW: Grab the current user */
-import styles from './MonthCapsule.module.css'
+import styles from './YearWrappedCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 import StoryMode from './StoryMode.jsx';
 
@@ -30,8 +30,8 @@ function buildSlots(hourData) {
   }))
 }
 
-function TimeBreakdown({ weekly, dow, hours }) {
-  const maxWeek = Math.max(...(weekly || []).map(w => w.minutes), 1)
+function TimeBreakdown({ monthly, dow, hours }) {
+  const maxMonth = Math.max(...(monthly || []).map(w => w.minutes), 1)
   const maxDow  = Math.max(...(dow    || []).map(d => d.minutes), 1)
   const slots   = buildSlots(hours)
   const maxSlot = Math.max(...slots.map(s => s.minutes), 1)
@@ -43,21 +43,20 @@ function TimeBreakdown({ weekly, dow, hours }) {
 
       <div className={styles.patternsGrid}>
 
-        {/* Week by week — vertical bars */}
+        {/* Month by month — vertical bars */}
         <div className={styles.patternCard}>
-          <p className={styles.patternTitle}>Week by Week</p>
+          <p className={styles.patternTitle}>Month by Month</p>
           <div className={styles.weekChart}>
-            {(weekly || []).map(w => (
-              <div key={w.week} className={styles.weekCol}>
-                <span className={styles.weekVal}>{formatMinutes(w.minutes)}</span>
+            {(monthly || []).map(m => (
+              <div key={m.month} className={styles.weekCol}>
+                <span className={styles.weekVal}>{formatMinutes(m.minutes)}</span>
                 <div className={styles.weekTrack}>
                   <div
                     className={styles.weekFill}
-                    style={{ height: `${Math.max((w.minutes / maxWeek) * 100, 3)}%` }}
+                    style={{ height: `${Math.max((m.minutes / maxMonth) * 100, 3)}%` }}
                   />
                 </div>
-                <span className={styles.weekLabel}>{w.label}</span>
-                <span className={styles.weekRange}>{w.range}</span>
+                <span className={styles.weekLabel}>{m.label}</span>
               </div>
             ))}
           </div>
@@ -218,7 +217,7 @@ function HistorySection({ history, onRefresh, isReadOnly }) {
   )
 }
 
-export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly = false }) {
+export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadOnly = false }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
   const posterRef = React.useRef(null) 
@@ -244,12 +243,12 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
           backgroundImage: 'radial-gradient(circle at 10% 10%, rgba(255, 0, 0, 0.15) 0%, transparent 60%), radial-gradient(circle at 90% 90%, rgba(255, 50, 50, 0.15) 0%, transparent 60%)',
         }
       })
-      const filename = `YT-Unwrapped-${monthLabel.replace(' ', '-')}.png`
+      const filename = `YT-Unwrapped-${yearLabel.replace(' ', '-')}.png`
       const blob = await (await fetch(dataUrl)).blob()
       const file = new File([blob], filename, { type: 'image/png' })
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try { await navigator.share({ title: `${monthLabel} Unwrapped`, files: [file] }) } 
+        try { await navigator.share({ title: `${yearLabel} Wrapped`, files: [file] }) } 
         catch (shareErr) { console.log('User canceled share') }
       } else {
         const link = document.createElement('a')
@@ -275,7 +274,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           user_id, 
-          month_label: monthLabel, 
+          month_label: yearLabel, 
           // Inject the user's name straight into the dashboard data payload!
           dashboard_data: { ...data, shared_by: auth.currentUser?.displayName || "A friend" } 
         })
@@ -315,7 +314,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
   const {
     total_plays, total_minutes, top_artists, top_songs, top_albums, top_music_directors,
     streak, throwback, days_active,
-    weekly_breakdown, day_of_week, hour_heatmap, history,
+    monthly_breakdown, day_of_week, hour_heatmap, history,
   } = data
 
   const maxArtist = top_artists?.[0]?.minutes || 1
@@ -345,7 +344,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
               <circle cx="12" cy="12" r="4.5" fill="white"/>
               <circle cx="12" cy="12" r="2" fill="#FF0000"/>
             </svg>
-            <h1 className={styles.posterTitle}>{monthLabel}</h1>
+            <h1 className={styles.posterTitle}>{yearLabel} Wrapped</h1>
           </div>
 
 <div className={styles.posterHero} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', width: '100%' }}>
@@ -439,7 +438,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
               unique_songs: uniqueSongsCount 
             } 
           }} 
-          monthLabel={monthLabel} 
+          monthLabel={yearLabel} 
           onClose={() => setShowStory(false)} 
         />
       )}
@@ -459,7 +458,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
             }}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-            Play {monthLabel} Story
+            Play {yearLabel} Wrapped Story
           </button>
         )}
 
@@ -547,7 +546,7 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
         </div>
 
         {/* ── 3. Patterns ── */}
-        <TimeBreakdown weekly={weekly_breakdown} dow={day_of_week} hours={hour_heatmap} />
+        <TimeBreakdown monthly={monthly_breakdown} dow={day_of_week} hours={hour_heatmap} />
 
       </div> {/* End of snapshot reference */}
 
@@ -595,13 +594,6 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
             )}
           </button>
 
-        </div>
-      )}
-
-      {/* ── 4. Full History (Hidden from friends!) ── */}
-      {!isReadOnly && (
-        <div style={{ marginTop: '32px' }}>
-          <HistorySection history={history} onRefresh={onRefresh} isReadOnly={isReadOnly} />
         </div>
       )}
 
