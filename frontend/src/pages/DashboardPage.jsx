@@ -136,9 +136,9 @@ export default function DashboardPage({ data, onRefresh }) {
                 </div>
                 
                 {/* Compare Action */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <div className={styles.compareActionWrapper}>
                   {!isComparing ? (
-                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ Compare with a Friend</button>
+                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ VS Battle</button>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '100%', width: '320px' }}>
                       <div style={{ display: 'flex', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '100px', border: '1px solid rgba(255,255,255,0.2)', overflow: 'hidden' }}>
@@ -186,9 +186,9 @@ export default function DashboardPage({ data, onRefresh }) {
                 </div>
 
                 {/* Compare Action for Year */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                <div className={styles.compareActionWrapper}>
                   {!isComparing ? (
-                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ Compare with a Friend</button>
+                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ VS Battle</button>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '100%', width: '320px' }}>
                       <div style={{ display: 'flex', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '100px', border: '1px solid rgba(255,255,255,0.2)', overflow: 'hidden' }}>
