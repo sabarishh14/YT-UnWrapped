@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: yt-unwrapped-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: YT_API_KEY
+        sync: false
+      - key: LASTFM_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: PROXY_URL
+        sync: false
