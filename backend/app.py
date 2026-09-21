@@ -3,6 +3,7 @@ import os
 import json
 import time
 import calendar
+import logging
 import requests
 import hashlib
 import uuid # <--- NEW: For generating secure share links
@@ -23,6 +24,11 @@ load_dotenv()
 PROXY_URL = os.environ.get("PROXY_URL")
 
 app = Flask(__name__)
+# Flask's logger only surfaces WARNING+ by default, which was hiding useful
+# info-level diagnostics (e.g. the proxy tunnel health check below) in the
+# HF Space logs. Bump it so app.logger.info(...) actually shows up.
+app.logger.setLevel(logging.INFO)
+
 CORS(app, resources={
     r"/*": {
         "origins": [
@@ -150,6 +156,15 @@ if PROXY_URL:
         app.logger.info(f"Proxy tunnel OK - exit IP: {_probe.text.strip()}")
     except Exception as e:
         app.logger.warning(f"Proxy tunnel check FAILED: {type(e).__name__}: {e}")
+
+    # Second probe: hit music.youtube.com directly (no ytmusicapi involved)
+    # to see if the proxy<->youtube leg fails even on a bare GET, isolating
+    # this from anything ytmusicapi-specific (headers, POST bodies, etc.)
+    try:
+        _yt_probe = session.get("https://music.youtube.com/", timeout=10)
+        app.logger.info(f"Proxy -> music.youtube.com OK - status {_yt_probe.status_code}")
+    except Exception as e:
+        app.logger.warning(f"Proxy -> music.youtube.com FAILED: {type(e).__name__}: {e}")
 
 ytmusic = YTMusic(requests_session=session)
 
