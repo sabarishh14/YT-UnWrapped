@@ -127,7 +127,11 @@ app.logger.info(f"Proxy configured for YT Music: {bool(PROXY_URL)}")
 
 class TimeoutSession(requests.Session):
     def request(self, *args, **kwargs):
-        kwargs.setdefault('timeout', 5)
+        # 5s was too tight through the proxy from HF's network path - real
+        # calls were timing out even though they succeed comfortably (~3s)
+        # from other networks. 12s still leaves plenty of headroom under
+        # gunicorn's 120s worker timeout.
+        kwargs.setdefault('timeout', 12)
         return super(TimeoutSession, self).request(*args, **kwargs)
 
 # This session is scoped to ytmusicapi calls ONLY - it does not affect
@@ -327,7 +331,11 @@ def get_durations(video_ids):
 def yt_retry(func, *args, **kwargs):
     try:
         return func(*args, **kwargs)
-    except Exception:
+    except Exception as e:
+        # Log the REAL failure reason here - callers only see a bare None,
+        # which otherwise shows up downstream as a confusing, unrelated
+        # 'NoneType' has no attribute error with no clue what actually failed.
+        app.logger.warning(f"[YTMusicAPI] {getattr(func, '__name__', func)} raised: {type(e).__name__}: {e}")
         return None
 
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
@@ -346,13 +354,10 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
 
     # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
     if video_id and not str(video_id).startswith("lfm_"):
-        try:
-            watch_playlist = yt_retry(ytmusic.get_watch_playlist, videoId=video_id)
-            tracks = watch_playlist.get("tracks", [])
-            if tracks:
-                best_match = tracks[0]
-        except Exception as e:
-            app.logger.warning(f"[YTMusicAPI] get_watch_playlist failed for '{video_id}': {e}")
+        watch_playlist = yt_retry(ytmusic.get_watch_playlist, videoId=video_id)
+        tracks = (watch_playlist or {}).get("tracks", [])
+        if tracks:
+            best_match = tracks[0]
     
     # 2. If video ID lookup failed or returned nothing, fallback to text Search
     if not best_match:
@@ -552,8 +557,8 @@ def enrich_artists(records: list, user_id: str) -> None:
     
     app.logger.info(f"Enriching {len(uncached)} new titles for {user_id}...")
 
-    # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM)
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM / proxied requests)
+    with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
         for i, future in enumerate(as_completed(futures)):
             # THIS IS THE CRITICAL LINE THAT UPDATES THE FRONTEND:
