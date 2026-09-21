@@ -1,0 +1,39 @@
+name: Sync Backend to Hugging Face Space
+
+# This ensures the action only runs when you push to main
+# AND only when you actually change files in the backend folder.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+  workflow_dispatch: {} # lets you manually re-run a sync from the Actions tab
+
+jobs:
+  sync-to-hub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Fetches all history so the subtree push works
+
+      - name: Push backend folder to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          # 1. Clone the Hugging Face Space to a temporary folder
+          git clone https://sabarishhh14:${HF_TOKEN}@huggingface.co/spaces/sabarishhh14/YT-UnWrapped hf-space
+
+          # 2. Copy all files from our GitHub backend/ folder into the HF folder
+          # (This updates code but safely preserves files not tracked in GitHub)
+          cp -a backend/. hf-space/
+
+          # 3. Commit and push the changes back to Hugging Face
+          cd hf-space
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "${{ github.event.head_commit.message }}" || echo "No changes to commit"
+          git push
