@@ -86,16 +86,24 @@ export default function App() {
       .then(res => res.json())
       .then(data => {
         if (!data.error && data.months_available?.length > 0) {
-          // NEW: startTransition tells React to paint the new heavy dashboard 
+          // NEW: startTransition tells React to paint the new heavy dashboard
           // in the background WITHOUT freezing the user's screen!
           startTransition(() => {
             setAnalysisData(data);
             const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setFileName(`Cloud Data (Synced: ${timeStr})`); 
+            setFileName(`Cloud Data (Synced: ${timeStr})`);
           });
+        } else if (data.error && silent) {
+          // A silent background sync failed - don't blow away the dashboard
+          // the user is already looking at, but don't pretend it worked either.
+          console.error('Background sync failed:', data.error);
+          setFileName(`Sync failed - showing last known data`);
         }
       })
-      .catch(err => console.log('No existing data found.'))
+      .catch(err => {
+        console.error('Sync request failed:', err);
+        if (silent) setFileName(`Sync failed - showing last known data`);
+      })
       .finally(() => {
         setIsInitializing(false);
         if (!silent) setIsFetchingCloud(false);

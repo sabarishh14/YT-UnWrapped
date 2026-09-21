@@ -1,20 +1,10 @@
 import re
 import os
-
-# --- NEW: FORCE ALL NETWORK TRAFFIC THROUGH THE PROXY GLOBALLY ---
-PROXY_URL = os.environ.get("PROXY_URL")
-if PROXY_URL:
-    os.environ["http_proxy"] = PROXY_URL
-    os.environ["https_proxy"] = PROXY_URL
-    os.environ["HTTP_PROXY"] = PROXY_URL
-    os.environ["HTTPS_PROXY"] = PROXY_URL
-# -----------------------------------------------------------------
 import json
 import time
 import calendar
 import requests
 import hashlib
-import sqlite3
 import uuid # <--- NEW: For generating secure share links
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +15,12 @@ from dotenv import load_dotenv
 from ytmusicapi import YTMusic
 
 load_dotenv()
+
+# PROXY_URL is only needed to route around YouTube Music blocking datacenter
+# IPs. It is scoped to the ytmusic session and the YouTube Data API calls
+# below (not applied process-wide), so a dead/misconfigured proxy can't take
+# down unrelated calls like Last.fm or iTunes.
+PROXY_URL = os.environ.get("PROXY_URL")
 
 app = Flask(__name__)
 CORS(app, resources={
@@ -41,8 +37,12 @@ CORS(app, resources={
 YT_API_KEY     = os.environ.get("YT_API_KEY", "")
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
-import psycopg2
-from psycopg2.extras import execute_values
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+except ImportError:
+    psycopg2 = None
+    execute_values = None
 from contextlib import contextmanager  
 
 # --- SUPABASE / POSTGRES CLOUD DB SETUP ---
@@ -51,6 +51,21 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 
 @contextmanager
 def get_db_connection():
+    if not psycopg2 or not DATABASE_URL:
+        # Return a dummy connection object that accepts cursor().execute()
+        class DummyCursor:
+            def execute(self, *args, **kwargs): pass
+            def fetchall(self): return []
+            def fetchone(self): return None
+            def __enter__(self): return self
+            def __exit__(self, exc_type, exc_val, exc_tb): pass
+        class DummyConn:
+            def cursor(self): return DummyCursor()
+            def commit(self): pass
+            def close(self): pass
+        yield DummyConn()
+        return
+
     conn = psycopg2.connect(DATABASE_URL)
     try:
         yield conn
@@ -108,17 +123,21 @@ def init_db():
             """)
         conn.commit()
 
-# --- ADD THIS LINE TO DEBUG ---
-app.logger.info(f"🚨 PROXY LOADED: {bool(PROXY_URL)}") 
-# ------------------------------
+app.logger.info(f"Proxy configured for YT Music: {bool(PROXY_URL)}")
 
-session = requests.Session()
+class TimeoutSession(requests.Session):
+    def request(self, *args, **kwargs):
+        kwargs.setdefault('timeout', 5)
+        return super(TimeoutSession, self).request(*args, **kwargs)
+
+# This session is scoped to ytmusicapi calls ONLY - it does not affect
+# Last.fm/iTunes/YouTube Data API requests elsewhere in this file.
+session = TimeoutSession()
 if PROXY_URL:
     session.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
 
 ytmusic = YTMusic(requests_session=session)
 
-ytmusic = YTMusic()
 
 DEFAULT_TRACK_DURATION = 210  # 3.5 min fallback
 MIN_PLAY_SECONDS       = 30   # minimum for a "play"
@@ -149,7 +168,8 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
             "api_key": LASTFM_API_KEY,
             "format": "json",
             "limit": 200,
-            "page": page
+            "page": page,
+            "_": int(time.time()) # CACHE BUSTER
         }
         if from_ts:
             params["from"] = int(from_ts)
@@ -304,6 +324,12 @@ def get_durations(video_ids):
                 DURATION_CACHE[v] = DEFAULT_TRACK_DURATION
     return {v: DURATION_CACHE.get(v, DEFAULT_TRACK_DURATION) for v in video_ids}
 
+def yt_retry(func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except Exception:
+        return None
+
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
         cached = ARTIST_CACHE[title]
@@ -321,7 +347,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
     if video_id and not str(video_id).startswith("lfm_"):
         try:
-            watch_playlist = ytmusic.get_watch_playlist(videoId=video_id)
+            watch_playlist = yt_retry(ytmusic.get_watch_playlist, videoId=video_id)
             tracks = watch_playlist.get("tracks", [])
             if tracks:
                 best_match = tracks[0]
@@ -334,14 +360,14 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             search_query = f"{clean_title} {channel_artist}".strip() if not is_junk(channel_artist) else clean_title
             
             # Attempt 1: Strict "songs" search
-            results = ytmusic.search(search_query, filter="songs", limit=1)
+            results = yt_retry(ytmusic.search, search_query, filter="songs", limit=1)
             
             # Attempt 2: If that fails, it might be classified as a "video" (common for some tracks)
             if not results:
-                results = ytmusic.search(search_query, filter="videos", limit=1)
+                results = yt_retry(ytmusic.search, search_query, filter="videos", limit=1)
                 
             if not results and channel_artist:
-                results = ytmusic.search(clean_title, filter="songs", limit=1)
+                results = yt_retry(ytmusic.search, clean_title, filter="songs", limit=1)
 
             if results:
                 potential_match = results[0]
@@ -368,7 +394,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
         album_info = best_match.get('album')
         if album_info and album_info.get('id'):
             try:
-                full_album = ytmusic.get_album(album_info['id'])
+                full_album = yt_retry(ytmusic.get_album, album_info['id'])
                 album_artists = [a['name'] for a in full_album.get('artists', [])]
                 
                 existing_lower = [a.lower() for a in artists]
@@ -392,6 +418,9 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
         
         images = best_match.get('thumbnails', [])
         image_url = images[-1]['url'] if images else None
+        if image_url:
+            # Upgrade thumbnail resolution from 120x120 to 1080x1080
+            image_url = re.sub(r'=w\d+-h\d+.*', '=w1080-h1080', image_url)
         
         duration = best_match.get('duration_seconds')
         if duration is None and best_match.get('length'):
@@ -419,44 +448,40 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             meta = {"artist": fallback, "image": None}
 
     # 🚀 THE MASTER THUMBNAIL INJECTOR 🚀
-    # If we STILL don't have an image, force Saavn to find one!
+    # If we STILL don't have an image, force iTunes to find one!
     if not meta.get("image"):
-        print(f"\n🖼️ Image missing for '{clean_title}'. Booting up Saavn Injector...")
-        saavn_img = fetch_saavn_thumbnail(clean_title, channel_artist)
-        if saavn_img:
-            print(f"   ✅ SUCCESS! Saavn found the cover: {saavn_img}")
-            meta["image"] = saavn_img
+        print(f"\n[IMG] Image missing for '{clean_title}'. Booting up iTunes Injector...")
+        itunes_img = fetch_itunes_thumbnail(clean_title, channel_artist)
+        if itunes_img:
+            print(f"   OK SUCCESS! iTunes found the cover: {itunes_img}")
+            meta["image"] = itunes_img
         else:
-            print(f"   ❌ FAILED! Saavn couldn't find a cover either.")
+            print(f"   X FAILED! iTunes couldn't find a cover either.")
 
     # Save to Database and Return
     ARTIST_CACHE[title] = meta
     return meta
 
-def fetch_saavn_thumbnail(title: str, context: str) -> str:
-    """Fetches ONLY the 50x50 thumbnail from the Saavn Sumit API."""
+def fetch_itunes_thumbnail(title: str, context: str) -> str:
+    """Fetches the 500x500 thumbnail from the official iTunes API."""
     try:
         query = f"{title} {context}".strip() if not is_junk(context) else title
-        print(f"   🔍 Searching Saavn API for: {query}") # <--- DEBUG LOG
+        print(f"   [SEARCH] Searching iTunes API for: {query}") # <--- DEBUG LOG
         
         resp = requests.get(
-            "https://saavn.sumit.co/api/search/songs",
-            params={"query": query},
+            "https://itunes.apple.com/search",
+            params={"term": query, "entity": "song", "limit": 1},
             timeout=5
         )
-        if resp.ok:
+        if resp.status_code == 200:
             data = resp.json()
-            if data.get("success") and data.get("data", {}).get("results"):
-                images = data["data"]["results"][0].get("image", [])
-                if images:
-                    for img in images:
-                        if "50x50" in img.get("quality", ""):
-                            return img.get("url") or img.get("link")
-                    return images[0].get("url") or images[0].get("link")
-            else:
-                print("   ❌ Saavn API returned success: false or no results.")
+            if data.get("resultCount", 0) > 0:
+                img = data["results"][0].get("artworkUrl100")
+                if img:
+                    return img.replace("100x100bb.jpg", "500x500bb.jpg")
+        print("   X iTunes API returned no results.")
     except Exception as e:
-        print(f"   ⚠️ Saavn API Exception: {e}")
+        print(f"   ⚠️ iTunes API Exception: {e}")
         
     return None
 
@@ -502,9 +527,6 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
     return None
 
 def enrich_artists(records: list, user_id: str) -> None:
-    # --- ADD THIS LOUD DEBUG LINE ---
-    print(f"\n🚨🚨🚨 PROXY SECRET IS: {os.environ.get('PROXY_URL')} 🚨🚨🚨\n", flush=True)
-    # --------------------------------
     seen = {}
     for r in records:
         cached_entry = ARTIST_CACHE.get(r["title"])
@@ -555,7 +577,7 @@ def enrich_artists(records: list, user_id: str) -> None:
         r["artist"]     = r["artists"][0]
         r["saavn_name"] = meta.get("saavn_name")
         # --- 1. ALBUM: Trust Last.fm FIRST to fix the "Single vs Album" issue ---
-        r["album"]      = r.get("album") or meta.get("album")
+        r["album"]      = meta.get("album") or r.get("album")
         
         # --- 2. EVERYTHING ELSE: Trust YouTube Music FIRST for higher quality data ---
         r["music_directors"] = meta.get("music_directors", [])
@@ -1013,13 +1035,20 @@ def analyze():
         # 3. Merge Takeout into existing
         merged_records = merge_records(existing_records, takeout_records)
         
-        # 4. Fetch new Last.fm scrobbles (SKIP IF QUICK REFRESH)
+        # 4. Fetch new Last.fm scrobbles
+        # NOTE: this runs even on quick_refresh - quick_refresh only skips
+        # re-parsing a Takeout upload. Last.fm is the ongoing sync mechanism
+        # between Takeout uploads, so skipping it here silently stopped new
+        # plays from ever being pulled in.
         lfm_records = []
-        if lastfm_username and not quick_refresh:
+        if lastfm_username:
             last_ts = None
             if merged_records:
-                latest_record = max(merged_records, key=lambda x: x["timestamp"])
-                last_ts = int(latest_record["timestamp"].timestamp()) + 1
+                now_utc = datetime.now(timezone.utc)
+                valid_records = [x for x in merged_records if x["timestamp"] <= now_utc]
+                if valid_records:
+                    latest_record = max(valid_records, key=lambda x: x["timestamp"])
+                    last_ts = int(latest_record["timestamp"].timestamp()) + 1
             lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts)
             
         # 5. Merge Last.fm scrobbles
@@ -1036,11 +1065,14 @@ def analyze():
             if hidden_set:
                 records = [r for r in records if r["video_id"] not in hidden_set]
 
-        # 6 & 7. Enrich and Save (SKIP IF QUICK REFRESH TO SAVE MASSIVE TIME!)
-        if not quick_refresh:
-            enrich_artists(records, user_id)
-            if user_id:
-                save_history(user_id, records)
+        # 6 & 7. Enrich and Save
+        # enrich_artists() only does real work for titles not already in
+        # ARTIST_CACHE, so this stays cheap on a quick_refresh where nothing
+        # new came in - but it's what actually persists newly-synced
+        # Last.fm plays, so it can't be skipped.
+        enrich_artists(records, user_id)
+        if user_id:
+            save_history(user_id, records)
 
         # Build durations map using local cache
         durations = {}
