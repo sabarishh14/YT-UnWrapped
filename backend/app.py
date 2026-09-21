@@ -140,6 +140,17 @@ session = TimeoutSession()
 if PROXY_URL:
     session.proxies.update({"http": PROXY_URL, "https": PROXY_URL})
 
+    # One-time diagnostic: confirm the CONNECT tunnel to the proxy itself
+    # works from wherever this process is running, and log which exit IP
+    # we actually get. If this fails/never logs, the proxy tunnel itself is
+    # the problem; if it succeeds but YT Music calls still SSL-fail, the
+    # issue is specific to the proxy<->youtube leg, not the client<->proxy leg.
+    try:
+        _probe = session.get("https://ipv4.webshare.io/", timeout=10)
+        app.logger.info(f"Proxy tunnel OK - exit IP: {_probe.text.strip()}")
+    except Exception as e:
+        app.logger.warning(f"Proxy tunnel check FAILED: {type(e).__name__}: {e}")
+
 ytmusic = YTMusic(requests_session=session)
 
 
@@ -329,14 +340,23 @@ def get_durations(video_ids):
     return {v: DURATION_CACHE.get(v, DEFAULT_TRACK_DURATION) for v in video_ids}
 
 def yt_retry(func, *args, **kwargs):
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        # Log the REAL failure reason here - callers only see a bare None,
-        # which otherwise shows up downstream as a confusing, unrelated
-        # 'NoneType' has no attribute error with no clue what actually failed.
-        app.logger.warning(f"[YTMusicAPI] {getattr(func, '__name__', func)} raised: {type(e).__name__}: {e}")
-        return None
+    name = getattr(func, '__name__', func)
+    last_err = None
+    # Rotating proxies occasionally hand out a flaky exit IP for a single
+    # connection; one quick retry usually lands on a healthy one. Kept to
+    # 2 attempts total (not more) because lookup_metadata() can chain up to
+    # ~4 of these calls per track - each one retrying too aggressively risks
+    # a single track's lookup approaching gunicorn's 120s worker timeout,
+    # which would kill the whole /api/analyze request, not just that track.
+    for attempt in range(2):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            if attempt == 0:
+                time.sleep(0.4)
+    app.logger.warning(f"[YTMusicAPI] {name} raised after retry: {type(last_err).__name__}: {last_err}")
+    return None
 
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
