@@ -1,4 +1,4 @@
-import { useState, useEffect, startTransition } from 'react' // <--- Add startTransition
+import { useState, useEffect, useRef, startTransition } from 'react' // <--- Add startTransition
 import UploadPage from './pages/UploadPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
@@ -16,6 +16,18 @@ export default function App() {
   const [isInitializing, setIsInitializing] = useState(true)
   const [isFetchingCloud, setIsFetchingCloud] = useState(false)
   const [progressMsg, setProgressMsg] = useState('') // The one we just added
+  const [isSyncing, setIsSyncing] = useState(false)
+  // Guards against firing a second /api/analyze while one is still in
+  // flight (e.g. the background silent sync and a manual "Sync Now" click
+  // overlapping during a slow cold start) - a ref because it needs to be
+  // read synchronously inside fetchCloudData, not just trigger a re-render.
+  const syncInFlight = useRef(false)
+
+  // Render's free tier can take 30-60s to cold-start after being idle.
+  // Without this, the loading screen just sits on "Starting up..." and
+  // looks frozen/broken, which is what prompts people to keep clicking
+  // Refresh (which is what caused the concurrent-sync crash).
+  const [showColdStartHint, setShowColdStartHint] = useState(false)
 
   // ── THE MISSING HASH STATE (Make sure this is here!) ──
   const [hash, setHash] = useState(window.location.hash);
@@ -26,6 +38,14 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
   // ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (isInitializing || isFetchingCloud) {
+      const t = setTimeout(() => setShowColdStartHint(true), 6000);
+      return () => clearTimeout(t);
+    }
+    setShowColdStartHint(false);
+  }, [isInitializing, isFetchingCloud]);
 
   // --- NEW: Global Progress Polling Effect ---
   useEffect(() => {
@@ -66,13 +86,22 @@ export default function App() {
 
   // The Silent Refresh Engine
   const fetchCloudData = (uid, lfm, silent = false) => {
+    if (syncInFlight.current) {
+      // A sync is already running (background or manual) - don't fire a
+      // second overlapping /api/analyze. The backend also guards against
+      // this now, but avoiding it here means no wasted request either.
+      return;
+    }
+    syncInFlight.current = true;
+    setIsSyncing(true);
+
     if (!silent) {
-      setIsFetchingCloud(true); 
+      setIsFetchingCloud(true);
     } else {
       // NEW: Instant visual feedback so you know it's working!
-      setFileName("Syncing changes..."); 
+      setFileName("Syncing changes...");
     }
-    
+
     fetch(`${API_BASE}/api/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -107,6 +136,8 @@ export default function App() {
       .finally(() => {
         setIsInitializing(false);
         if (!silent) setIsFetchingCloud(false);
+        syncInFlight.current = false;
+        setIsSyncing(false);
       })
   }
 
@@ -225,6 +256,11 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {progressText && <p style={{ fontFamily: 'monospace', fontSize: '16px', color: '#aaa', letterSpacing: '1.5px' }}>{progressText}</p>}
             {etaText && <p style={{ fontSize: '20px', fontWeight: 600, color: '#ff3333', letterSpacing: '-0.5px', textShadow: '0 0 20px rgba(255, 0, 0, 0.4)' }}>{etaText}</p>}
+            {showColdStartHint && (
+              <p style={{ fontSize: '14px', color: '#888', maxWidth: '320px', lineHeight: '1.5' }}>
+                Our free-tier server takes a moment to wake up after being idle — this can take up to a minute. Still working, hang tight.
+              </p>
+            )}
           </div>
         </div>
         <style>{`
@@ -360,12 +396,13 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       
-      <Navbar 
-        onGoBack={analysisData ? handleGoBack : null} 
-        onClear={user ? handleClearData : null} 
-        onLogout={user ? handleLogout : null} 
-        fileName={fileName} 
+      <Navbar
+        onGoBack={analysisData ? handleGoBack : null}
+        onClear={user ? handleClearData : null}
+        onLogout={user ? handleLogout : null}
+        fileName={fileName}
         onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, false)} // <--- CHANGED FROM TRUE TO FALSE
+        isSyncing={isSyncing}
       />
       
       <main style={{ flex: 1 }}>

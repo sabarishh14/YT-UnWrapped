@@ -939,6 +939,22 @@ def clear_data():
 
 PROGRESS = {}
 
+# Guards against two /api/analyze calls for the same user running
+# concurrently (e.g. the background silent sync and a manual Refresh click
+# overlapping while Render's free tier is cold-starting). Without this, both
+# requests race on the shared PROGRESS[user_id] dict and whichever finishes
+# first pops the entry out from under the other, crashing it with a KeyError.
+ACTIVE_SYNCS = set()
+
+def get_cached_dashboard(user_id):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT dashboard_data FROM user_cache WHERE username = %s", (user_id,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    return None
+
 @app.route("/api/progress", methods=["GET"])
 def get_progress():
     user_id = request.args.get("user_id")
@@ -1055,12 +1071,24 @@ def get_shared_link(token):
 # ─────────────────────────────────────────────────────────
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
+    user_id = ""  # bound up-front so the finally block below is always safe
     try:
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
         user_id = body.get("user_id", "").strip()
         lastfm_username = body.get("lastfm_username", "").strip()
         quick_refresh = body.get("quick_refresh", False) # <--- NEW FLAG
+
+        # A sync for this user is already running (e.g. the background
+        # silent sync and a manual Refresh overlapped) - don't run the
+        # pipeline twice concurrently. Just hand back whatever's cached.
+        if user_id and user_id in ACTIVE_SYNCS:
+            cached = get_cached_dashboard(user_id)
+            if cached:
+                return jsonify(cached)
+            return jsonify({"error": "A sync is already in progress for this account - try again in a moment."}), 409
+        if user_id:
+            ACTIVE_SYNCS.add(user_id)
 
         global PROGRESS
         if not quick_refresh:
@@ -1247,6 +1275,8 @@ def analyze():
     except Exception as e:
         app.logger.error(f"Analysis error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+    finally:
+        ACTIVE_SYNCS.discard(user_id)
 
 # --- NEW: Ultra-fast route just to grab the cached JSON ---
 @app.route("/api/get_cache", methods=["GET"])
@@ -1254,14 +1284,9 @@ def get_cache():
     user_id = request.args.get("user_id")
     if not user_id: return jsonify({"error": "Missing user_id"}), 400
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT dashboard_data FROM user_cache WHERE username = %s", (user_id,))
-                row = cur.fetchone()
-                if row and row[0]:
-                    # psycopg2 handles JSONB decoding automatically, but just in case:
-                    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                    return jsonify(data)
+        cached = get_cached_dashboard(user_id)
+        if cached:
+            return jsonify(cached)
         return jsonify({"error": "No cache found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500

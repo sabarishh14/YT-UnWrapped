@@ -17,7 +17,7 @@ const YTMusicIcon = () => (
   </svg>
 )
 
-export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefresh }) {
+export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefresh, isSyncing }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [hiddenTracks, setHiddenTracks] = useState([]);
   const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -136,13 +136,14 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
                   <span style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(74, 222, 128, 0.2)' }}>
                     Connected
                   </span>
-                  <button 
-                    onClick={() => { if(onRefresh) onRefresh(); setIsSettingsOpen(false); }} 
-                    style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', transition: 'all 0.2s' }}
-                    onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.1)'}
-                    onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.05)'}
+                  <button
+                    disabled={isSyncing}
+                    onClick={() => { if(onRefresh) onRefresh(); setIsSettingsOpen(false); }}
+                    style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '6px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: '600', cursor: isSyncing ? 'not-allowed' : 'pointer', opacity: isSyncing ? 0.5 : 1, transition: 'all 0.2s' }}
+                    onMouseEnter={e => { if (!isSyncing) e.target.style.background = 'rgba(255,255,255,0.1)' }}
+                    onMouseLeave={e => { if (!isSyncing) e.target.style.background = 'rgba(255,255,255,0.05)' }}
                   >
-                    Sync Now
+                    {isSyncing ? 'Syncing…' : 'Sync Now'}
                   </button>
                 </div>
               </div>
