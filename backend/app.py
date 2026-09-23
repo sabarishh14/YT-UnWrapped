@@ -373,13 +373,20 @@ def yt_retry(func, *args, **kwargs):
     app.logger.warning(f"[YTMusicAPI] {name} raised after retry: {type(last_err).__name__}: {last_err}")
     return None
 
+MAX_ENRICH_ATTEMPTS = 3  # give up on finding an image after this many tries
+
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
+    prior_attempts = 0
     if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
         cached = ARTIST_CACHE[title]
-        # If the cached entry already has a thumbnail, return it immediately
-        # Otherwise, treat it as incomplete and re-fetch
-        if cached.get("image"):
+        # If the cached entry already has a thumbnail, return it immediately.
+        # If it doesn't, but we've already tried enough times, also return it
+        # as-is - some titles (live streams, junk Takeout entries) will never
+        # have a real thumbnail, and without this cap they'd get re-fetched
+        # from scratch on every single sync forever.
+        if cached.get("image") or cached.get("_enrich_attempts", 0) >= MAX_ENRICH_ATTEMPTS:
             return cached
+        prior_attempts = cached.get("_enrich_attempts", 0)
 
     clean_title = re.sub(r'(?i)\(.*?lyrical.*?\)|\[.*?official.*?\]|\(.*?audio.*?\]|\(feat\..*?\)', '', title)
     clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', clean_title).strip()
@@ -498,6 +505,9 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
         else:
             print(f"   X FAILED! iTunes couldn't find a cover either.")
 
+    if not meta.get("image"):
+        meta["_enrich_attempts"] = prior_attempts + 1
+
     # Save to Database and Return
     ARTIST_CACHE[title] = meta
     return meta
@@ -570,11 +580,14 @@ def enrich_artists(records: list, user_id: str) -> None:
     seen = {}
     for r in records:
         cached_entry = ARTIST_CACHE.get(r["title"])
-        # Re-enrich if not cached at all, OR if cached but missing thumbnail
+        # Re-enrich if not cached at all, OR if cached but missing thumbnail -
+        # unless we've already given up on finding one for this title (see
+        # MAX_ENRICH_ATTEMPTS), otherwise unmatchable titles (live streams,
+        # junk Takeout entries) get retried from scratch on every sync forever.
         needs_enrichment = (
-            not cached_entry 
-            or not isinstance(cached_entry, dict) 
-            or not cached_entry.get("image")
+            not cached_entry
+            or not isinstance(cached_entry, dict)
+            or (not cached_entry.get("image") and cached_entry.get("_enrich_attempts", 0) < MAX_ENRICH_ATTEMPTS)
         )
         if needs_enrichment and r["title"] not in seen:
             seen[r["title"]] = (r["artist"], r["video_id"])
