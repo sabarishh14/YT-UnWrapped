@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import styles from './DashboardPage.module.css'
 import MonthCapsule from '../components/MonthCapsule.jsx'
 import YearWrappedCapsule from '../components/YearWrappedCapsule.jsx'
@@ -11,8 +11,25 @@ const FULL_MONTH_NAMES = ['January','February','March','April','May','June','Jul
 
 const ALL_TIME = 'all'
 
+function labelFor(period) {
+  if (period === ALL_TIME) return 'All Time'
+  if (!period.includes('-')) return `${period} Wrapped`
+  const [y, m] = period.split('-').map(Number)
+  return `${FULL_MONTH_NAMES[m - 1]} ${y}`
+}
+
+// A friend's stats for one period, shaped for CompareView. Throws with a
+// readable message if they have no stats for it.
+async function loadFriendComparison(friend, period) {
+  const res = await apiFetch(`/api/friends/${friend.code}/compare?period=${encodeURIComponent(period)}`)
+  const d = await res.json()
+  if (!res.ok) throw new Error(d.error || "Couldn't load your friend's stats.")
+  if (!d.data) throw new Error(`${friend.name} doesn't have stats for ${labelFor(period)} yet.`)
+  return { stats: d.data, name: friend.name, blend: d.blend, lastSynced: d.last_synced }
+}
+
 // VS Battle: pick a friend (live stats for this period) or paste a share link.
-function CompareAction({ period, onResult }) {
+function CompareAction({ onPickFriend, onResult }) {
   const [open, setOpen] = useState(false)
   const [friends, setFriends] = useState(null)
   const [token, setToken] = useState('')
@@ -31,11 +48,7 @@ function CompareAction({ period, onResult }) {
     setBusy(friend.code)
     setError('')
     try {
-      const res = await apiFetch(`/api/friends/${friend.code}/compare?period=${encodeURIComponent(period)}`)
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.error)
-      if (!d.data) throw new Error(`${friend.name} doesn't have stats for this period yet.`)
-      onResult({ stats: d.data, name: friend.name, blend: d.blend, lastSynced: d.last_synced })
+      await onPickFriend(friend)
     } catch (e) {
       setError(e.message || "Couldn't load your friend's stats.")
     }
@@ -136,12 +149,50 @@ export default function DashboardPage({ data, onRefresh }) {
   }, [monthly_stats, yearly_stats, all_time, selectedMonth, isYearView, isAllTime])
 
   const [year, month] = selectedMonth.split('-').map(Number)
-  const periodLabel = isAllTime ? 'All Time' : isYearView ? `${selectedMonth} Wrapped` : `${FULL_MONTH_NAMES[month - 1]} ${year}`
+  const periodLabel = labelFor(selectedMonth)
 
-  const select = (period) => {
-    setSelectedMonth(period)
-    setFriendData(null)
+  // The friend you're battling stays selected while you switch periods, so
+  // clicking another month / year / All Time loads *their* stats for it too.
+  // (A pasted share link is a snapshot of one period, so switching ends it.)
+  const [opponent, setOpponent] = useState(null)
+  const [battleStatus, setBattleStatus] = useState({ loading: false, error: '' })
+  const latestRequest = useRef(0)
+
+  const pickFriend = async (friend) => {
+    const result = await loadFriendComparison(friend, selectedMonth)  // throws -> shown in the picker
+    setOpponent(friend)
+    setFriendData(result)
+    setBattleStatus({ loading: false, error: '' })
   }
+
+  const endBattle = () => {
+    latestRequest.current++  // ignore any in-flight period load
+    setOpponent(null)
+    setFriendData(null)
+    setBattleStatus({ loading: false, error: '' })
+  }
+
+  const select = async (period) => {
+    setSelectedMonth(period)
+    if (!opponent) {
+      setFriendData(null)
+      return
+    }
+    const request = ++latestRequest.current
+    setBattleStatus({ loading: true, error: '' })
+    try {
+      const result = await loadFriendComparison(opponent, period)
+      if (request !== latestRequest.current) return  // a newer click won
+      setFriendData(result)
+      setBattleStatus({ loading: false, error: '' })
+    } catch (e) {
+      if (request !== latestRequest.current) return
+      setFriendData(null)
+      setBattleStatus({ loading: false, error: e.message })
+    }
+  }
+
+  const inBattle = opponent || friendData
 
   return (
     <div className={styles.page}>
@@ -207,16 +258,30 @@ export default function DashboardPage({ data, onRefresh }) {
         </div>
       </div>
 
-      {friendData && capsuleData ? (
-        <CompareView
-          myData={capsuleData}
-          friendData={friendData.stats}
-          friendName={friendData.name}
-          blend={friendData.blend}
-          lastSynced={friendData.lastSynced}
-          periodLabel={periodLabel}
-          onGoBack={() => setFriendData(null)}
-        />
+      {inBattle ? (
+        battleStatus.loading || battleStatus.error || !friendData || !capsuleData ? (
+          <div className={styles.battleStatus}>
+            {battleStatus.loading ? (
+              <>
+                <span className={styles.spinner} />
+                <p>Loading {opponent?.name}'s {periodLabel}…</p>
+              </>
+            ) : (
+              <p>{battleStatus.error || `You don't have stats for ${periodLabel} yet.`}</p>
+            )}
+            <button className={styles.compareToggleBtn} onClick={endBattle}>← Back to my stats</button>
+          </div>
+        ) : (
+          <CompareView
+            myData={capsuleData}
+            friendData={friendData.stats}
+            friendName={friendData.name}
+            blend={friendData.blend}
+            lastSynced={friendData.lastSynced}
+            periodLabel={periodLabel}
+            onGoBack={endBattle}
+          />
+        )
       ) : capsuleData && (
         <div className={styles.capsuleSection}>
           <div className={styles.capsuleHeader}>
@@ -247,7 +312,7 @@ export default function DashboardPage({ data, onRefresh }) {
               )}
             </div>
 
-            <CompareAction key={selectedMonth} period={selectedMonth} onResult={setFriendData} />
+            <CompareAction key={selectedMonth} onPickFriend={pickFriend} onResult={setFriendData} />
           </div>
 
           {isAllTime ? (
