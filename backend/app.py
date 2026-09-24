@@ -656,32 +656,22 @@ def enrich_artists(records: list, user_id: str) -> None:
     uncached = [(t, a, v) for t, (a, v) in seen.items()]
     uncached += [(t, a, v) for t, (a, v) in list(stale.items())[:STALE_PER_SYNC]]
     
-    global PROGRESS
-    if user_id not in PROGRESS:
-        PROGRESS[user_id] = {"message": "Idle", "processed": 0, "total": 0}
-        
-    PROGRESS[user_id]["total"] = len(uncached)
-    PROGRESS[user_id]["processed"] = 0
-    if len(uncached) > 0:
-        PROGRESS[user_id]["message"] = "Finding album art & high-res details..."
-    
-    app.logger.info(f"Enriching {len(uncached)} new titles for {user_id}...")
+    total = len(uncached)
+    if total:
+        set_progress(user_id, "Finding album art & details...", 0, total)
+
+    app.logger.info(f"Enriching {total} new titles for {user_id}...")
 
     # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM / proxied requests)
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
         for i, future in enumerate(as_completed(futures)):
-            # THIS IS THE CRITICAL LINE THAT UPDATES THE FRONTEND:
-            PROGRESS[user_id]["processed"] = i + 1
-            
-            # Print to the terminal so you can verify the backend isn't frozen!
-            if (i + 1) % 10 == 0 or (i + 1) == len(uncached):
-                print(f"Processed {i+1}/{len(uncached)}")
+            set_progress(user_id, "Finding album art & details...", i + 1, total)
 
     if uncached:
         save_cache()
 
-    PROGRESS[user_id]["message"] = "Wrapping things up..."
+    set_progress(user_id, "Wrapping things up...")
 
     for r in records:
         meta = ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})
@@ -1014,6 +1004,10 @@ def clear_data():
 
 PROGRESS = {}
 
+def set_progress(user_id, message, processed=0, total=0):
+    if user_id:
+        PROGRESS[user_id] = {"message": message, "processed": processed, "total": total}
+
 # Guards against two /api/analyze calls for the same user running
 # concurrently (e.g. the background silent sync and a manual Refresh click
 # overlapping while Render's free tier is cold-starting). Without this, both
@@ -1216,10 +1210,10 @@ def analyze():
             else:
                 lastfm_username = get_saved_lastfm_username(user_id)
 
-        global PROGRESS
-        if not quick_refresh:
-            PROGRESS[user_id] = {"message": "Unwrapping your listening history...", "processed": 0, "total": 0}
-        
+        # Report every stage (not just album-art enrichment, and not only for
+        # full syncs) so the app can show live progress for background syncs.
+        set_progress(user_id, "Loading your listening history...")
+
         # 1. Load existing history
         existing_records = load_history(user_id)
         
@@ -1244,7 +1238,10 @@ def analyze():
                 if valid_records:
                     latest_record = max(valid_records, key=lambda x: x["timestamp"])
                     last_ts = int(latest_record["timestamp"].timestamp()) + 1
+            set_progress(user_id, "Checking Last.fm for new plays...")
             lfm_records, lfm_error = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts)
+            n = len(lfm_records)
+            set_progress(user_id, f"Found {n} new play{'' if n == 1 else 's'}" if n else "No new plays on Last.fm")
         sync_info = {
             "lastfm_username": lastfm_username or None,
             "fetched_from": datetime.fromtimestamp(last_ts, tz=timezone.utc).isoformat() if last_ts else None,
@@ -1274,6 +1271,8 @@ def analyze():
         enrich_artists(records, user_id)
         if user_id:
             save_history(user_id, records)
+
+        set_progress(user_id, "Crunching your stats...")
 
         # Build durations map using local cache
         durations = {}
@@ -1368,9 +1367,6 @@ def analyze():
                 "history":          compute_full_history(yrs, durations),
             }
 
-        # Clear the user's progress from memory to save RAM
-        PROGRESS.pop(user_id, None)
-
         # --- ADDED THIS TO GET THE LATEST DATE ---
         last_played_date = "Unknown"
         if records:
@@ -1413,6 +1409,7 @@ def analyze():
         # may have taken over and we mustn't unlock it out from under it.
         if my_sync_start is not None and ACTIVE_SYNCS.get(user_id) == my_sync_start:
             ACTIVE_SYNCS.pop(user_id, None)
+            PROGRESS.pop(user_id, None)
 
 # --- NEW: Ultra-fast route just to grab the cached JSON ---
 @app.route("/api/get_cache", methods=["GET"])

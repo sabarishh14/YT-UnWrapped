@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, startTransition } from 'react' // <--- Add
 import UploadPage from './pages/UploadPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import Navbar from './components/Navbar.jsx'
+import SyncPill from './components/SyncPill.jsx'
 import { auth, loginWithGoogle, logout } from './firebase.js'
 import { onAuthStateChanged } from 'firebase/auth'
 import SharedPage from './pages/SharedPage.jsx' // <--- Add this!
@@ -17,6 +18,7 @@ export default function App() {
   const [isFetchingCloud, setIsFetchingCloud] = useState(false)
   const [progressMsg, setProgressMsg] = useState('') // The one we just added
   const [isSyncing, setIsSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState('')
   // Guards against firing a second /api/analyze while one is still in
   // flight (e.g. the background silent sync and a manual "Sync Now" click
   // overlapping during a slow cold start) - a ref because it needs to be
@@ -48,9 +50,11 @@ export default function App() {
   }, [isInitializing, isFetchingCloud]);
 
   // --- NEW: Global Progress Polling Effect ---
+  // Polls for every sync (not just the full-screen one), so background
+  // syncs show live progress in the SyncPill too.
   useEffect(() => {
     let pollId;
-    if (isFetchingCloud && user) {
+    if (isSyncing && user) {
       const startTime = Date.now();
       pollId = setInterval(async () => {
         try {
@@ -73,7 +77,7 @@ export default function App() {
             setProgressMsg(`${data.message}\n(${data.processed} / ${data.total} tracks)\n${etaStr}`);
           } else if (data.total > 0) {
             setProgressMsg(`${data.message}\n(0 / ${data.total} tracks)\nCalculating time...`);
-          } else {
+          } else if (data.message && data.message !== 'Idle') {
             setProgressMsg(data.message);
           }
         } catch (err) {}
@@ -82,7 +86,14 @@ export default function App() {
       setProgressMsg('');
     }
     return () => clearInterval(pollId);
-  }, [isFetchingCloud, user]);
+  }, [isSyncing, user]);
+
+  const syncResultTimer = useRef(null)
+  const showSyncResult = (text) => {
+    setSyncResult(text)
+    clearTimeout(syncResultTimer.current)
+    syncResultTimer.current = setTimeout(() => setSyncResult(''), 5000)
+  }
 
   const saveLastFmToServer = (uid, name) => {
     fetch(`${API_BASE}/api/settings`, {
@@ -134,17 +145,22 @@ export default function App() {
             else if (info.lastfm_error) detail = ` - Last.fm: ${info.lastfm_error}`;
             else if (info.lastfm_username) detail = ` - ${info.lastfm_fetched} new from Last.fm`;
             setFileName(`Synced ${timeStr}${detail}`);
+            showSyncResult(`Synced${detail.replace(' - ', ' · ')}`);
           });
         } else if (data.error && silent) {
           // A silent background sync failed - don't blow away the dashboard
           // the user is already looking at, but don't pretend it worked either.
           console.error('Background sync failed:', data.error);
           setFileName(`Sync failed - showing last known data`);
+          showSyncResult('Sync failed · showing last known data');
         }
       })
       .catch(err => {
         console.error('Sync request failed:', err);
-        if (silent) setFileName(`Sync failed - showing last known data`);
+        if (silent) {
+          setFileName(`Sync failed - showing last known data`);
+          showSyncResult('Sync failed · showing last known data');
+        }
       })
       .finally(() => {
         setIsInitializing(false);
@@ -445,11 +461,13 @@ export default function App() {
             />
           : <DashboardPage 
               data={analysisData} 
-              onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)} 
+              onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)}
             />
         }
       </main>
-      
+
+      <SyncPill syncing={isSyncing} progressMsg={progressMsg} result={syncResult} />
+
     </div>
   )
 }
