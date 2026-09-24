@@ -17,7 +17,7 @@ const YTMusicIcon = () => (
   </svg>
 )
 
-export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefresh, isSyncing }) {
+export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefresh, isSyncing, lastFmUser }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [hiddenTracks, setHiddenTracks] = useState([]);
   const API_BASE = import.meta.env.VITE_API_URL || "";
@@ -127,15 +127,23 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
                   </div>
                   <div>
                     <p style={{ margin: 0, color: '#fff', fontSize: '15px', fontWeight: '600' }}>Last.fm</p>
-                    <p style={{ margin: '2px 0 0 0', color: '#aaa', fontSize: '13px' }}>Scrobbling active</p>
+                    <p style={{ margin: '2px 0 0 0', color: '#aaa', fontSize: '13px' }}>
+                      {lastFmUser ? `@${lastFmUser}` : 'Not connected - add it from "Add Data"'}
+                    </p>
                   </div>
                 </div>
                 
                 {/* NEW: Sync Now Button added next to Connected badge */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end' }}>
-                  <span style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(74, 222, 128, 0.2)' }}>
-                    Connected
-                  </span>
+                  {lastFmUser ? (
+                    <span style={{ background: 'rgba(74, 222, 128, 0.1)', color: '#4ade80', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(74, 222, 128, 0.2)' }}>
+                      Connected
+                    </span>
+                  ) : (
+                    <span style={{ background: 'rgba(255, 179, 71, 0.1)', color: '#ffb347', padding: '4px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: '700', letterSpacing: '0.5px', border: '1px solid rgba(255, 179, 71, 0.2)' }}>
+                      Not connected
+                    </span>
+                  )}
                   <button
                     disabled={isSyncing}
                     onClick={() => { if(onRefresh) onRefresh(); setIsSettingsOpen(false); }}

@@ -127,6 +127,16 @@ def init_db():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            # Per-account settings. The Last.fm username used to live only in
+            # the browser's localStorage, so syncing from a different browser
+            # or device silently sent an empty username and never fetched
+            # anything new from Last.fm.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    username TEXT PRIMARY KEY,
+                    lastfm_username TEXT
+                );
+            """)
         conn.commit()
 
 app.logger.info(f"Proxy configured for YT Music: {bool(PROXY_URL)}")
@@ -560,9 +570,6 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
                     artist = match.get("artist", "").strip()
                     
                     if artist and not is_junk(artist):
-                        # --- NEW: Safely inject the Saavn 50x50 thumbnail! ---
-                        image_url = fetch_saavn_thumbnail(title, channel_artist)
-                        
                         app.logger.info(f"[LastFM] Found fallback for '{title}' → {artist}")
                         return {
                             "artist": artist,
@@ -959,6 +966,38 @@ PROGRESS = {}
 # first pops the entry out from under the other, crashing it with a KeyError.
 ACTIVE_SYNCS = set()
 
+def get_saved_lastfm_username(user_id):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT lastfm_username FROM user_settings WHERE username = %s", (user_id,))
+            row = cur.fetchone()
+            return row[0] if row and row[0] else ""
+
+def save_lastfm_username(user_id, lastfm_username):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO user_settings (username, lastfm_username)
+                VALUES (%s, %s)
+                ON CONFLICT (username) DO UPDATE SET lastfm_username = EXCLUDED.lastfm_username
+            """, (user_id, lastfm_username))
+        conn.commit()
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def user_settings():
+    if request.method == "GET":
+        user_id = request.args.get("user_id", "").strip()
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        return jsonify({"lastfm_username": get_saved_lastfm_username(user_id)})
+
+    body = request.get_json(force=True)
+    user_id = body.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"error": "Missing user_id"}), 400
+    save_lastfm_username(user_id, body.get("lastfm_username", "").strip())
+    return jsonify({"status": "success"})
+
 def get_cached_dashboard(user_id):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
@@ -1089,7 +1128,7 @@ def analyze():
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
         user_id = body.get("user_id", "").strip()
-        lastfm_username = body.get("lastfm_username", "").strip()
+        lastfm_username = (body.get("lastfm_username") or "").strip()
         quick_refresh = body.get("quick_refresh", False) # <--- NEW FLAG
 
         # A sync for this user is already running (e.g. the background
@@ -1102,6 +1141,14 @@ def analyze():
             return jsonify({"error": "A sync is already in progress for this account - try again in a moment."}), 409
         if user_id:
             ACTIVE_SYNCS.add(user_id)
+
+        # Remember the Last.fm username per account, and fall back to it when
+        # the browser doesn't send one (new device, cleared site data, etc).
+        if user_id:
+            if lastfm_username:
+                save_lastfm_username(user_id, lastfm_username)
+            else:
+                lastfm_username = get_saved_lastfm_username(user_id)
 
         global PROGRESS
         if not quick_refresh:

@@ -84,6 +84,14 @@ export default function App() {
     return () => clearInterval(pollId);
   }, [isFetchingCloud, user]);
 
+  const saveLastFmToServer = (uid, name) => {
+    fetch(`${API_BASE}/api/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: uid, lastfm_username: name })
+    }).catch(err => console.error('Failed to save Last.fm username:', err))
+  }
+
   // The Silent Refresh Engine
   const fetchCloudData = (uid, lfm, silent = false) => {
     if (syncInFlight.current) {
@@ -151,6 +159,21 @@ export default function App() {
       if (currentUser) {
         setIsFetchingCloud(true); // Show loading briefly while checking cache
 
+        // The Last.fm username is saved per account on the server, so it
+        // follows you across browsers/devices. Pull it down to keep the UI
+        // accurate; if only this browser knows it, push it up so it's saved.
+        fetch(`${API_BASE}/api/settings?user_id=${currentUser.uid}`)
+          .then(res => res.ok ? res.json() : null)
+          .then(settings => {
+            if (settings?.lastfm_username) {
+              localStorage.setItem('yt_lastfm', settings.lastfm_username)
+              setLastFmUser(settings.lastfm_username)
+            } else if (storedLastFm) {
+              saveLastFmToServer(currentUser.uid, storedLastFm)
+            }
+          })
+          .catch(() => {})
+
         // 1. Try to load the instant mathematical cache first!
         fetch(`${API_BASE}/api/get_cache?user_id=${currentUser.uid}`)
           .then(res => res.ok ? res.json() : Promise.reject('No cache'))
@@ -192,6 +215,7 @@ export default function App() {
   const handleSaveLastFm = (name) => {
     localStorage.setItem('yt_lastfm', name)
     setLastFmUser(name)
+    if (user) saveLastFmToServer(user.uid, name)
   }
 
   const handleGoBack = () => setAnalysisData(null)
@@ -403,6 +427,7 @@ export default function App() {
         fileName={fileName}
         onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, false)} // <--- CHANGED FROM TRUE TO FALSE
         isSyncing={isSyncing}
+        lastFmUser={lastFmUser}
       />
       
       <main style={{ flex: 1 }}>
