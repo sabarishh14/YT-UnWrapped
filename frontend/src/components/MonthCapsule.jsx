@@ -3,6 +3,7 @@ import { auth } from '../firebase.js' /* <-- NEW: Grab the current user */
 import styles from './MonthCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 import StoryMode from './StoryMode.jsx';
+import Highlights from './Highlights.jsx'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -545,6 +546,8 @@ export default function MonthCapsule({ data, monthLabel, onRefresh, isReadOnly =
             />
           </div>
         </div>
+
+        <Highlights highlights={data.highlights} throwback={throwback} period="month" />
 
         {/* ── 3. Patterns ── */}
         <TimeBreakdown weekly={weekly_breakdown} dow={day_of_week} hours={hour_heatmap} />

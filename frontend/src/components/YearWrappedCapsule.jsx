@@ -3,6 +3,7 @@ import { auth } from '../firebase.js' /* <-- NEW: Grab the current user */
 import styles from './YearWrappedCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 import StoryMode from './StoryMode.jsx';
+import Highlights from './Highlights.jsx'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -544,6 +545,8 @@ export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadO
             />
           </div>
         </div>
+
+        <Highlights highlights={data.highlights} period="year" />
 
         {/* ── 3. Patterns ── */}
         <TimeBreakdown monthly={monthly_breakdown} dow={day_of_week} hours={hour_heatmap} />

@@ -10,6 +10,7 @@ import uuid # <--- NEW: For generating secure share links
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -955,6 +956,120 @@ def compute_hour_heatmap(records, durations):
         hour_m[r["timestamp"].hour] += durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60
     return [{"hour": h, "label": f"{h:02d}:00", "minutes": round(hour_m[h], 1)} for h in range(24)]
 
+# ── Highlights (Spotify-Wrapped-style extras) ────────────
+# Hour windows match the Time of Day slots in the frontend capsules.
+PERSONAS = [
+    (range(0, 6),   "Night Owl",         "🦉", "The world sleeps, your playlist doesn't."),
+    (range(6, 12),  "Early Bird",        "🌅", "Every day starts with a soundtrack."),
+    (range(12, 17), "Daydreamer",        "☀️", "Your music peaks while the sun is up."),
+    (range(17, 21), "Sunset Chaser",     "🌆", "Music is how you unwind."),
+    (range(21, 24), "Midnight Wanderer", "🌃", "When the day is done, the music starts."),
+]
+SESSION_GAP = timedelta(minutes=30)  # a longer pause between plays ends a session
+
+def get_user_tz(tz_name):
+    try:
+        return ZoneInfo(tz_name) if tz_name else timezone.utc
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+def song_key(r):
+    return f"{r.get('saavn_name') or r['title']}_{r['artist']}"
+
+def _day_label(d):
+    return f"{d:%b} {d.day}"
+
+def _time_label(ts):
+    return f"{ts.hour % 12 or 12}:{ts.minute:02d} {'AM' if ts.hour < 12 else 'PM'}"
+
+def compute_highlights(records, durations, seen_artists, seen_songs, is_first_period):
+    """records: this period's plays; seen_artists / seen_songs: everything
+    played before this period (for discoveries)."""
+    if not records:
+        return None
+    dur = lambda r: durations.get(r["video_id"], DEFAULT_TRACK_DURATION)
+    recs = sorted(records, key=lambda r: r["timestamp"])
+    total_min = sum(dur(r) for r in recs) / 60 or 1
+
+    # Listening personality: which part of the day you listen most in.
+    slot_min = [sum(dur(r) for r in recs if r["timestamp"].hour in hours) / 60 for hours, *_ in PERSONAS]
+    peak = max(range(len(PERSONAS)), key=lambda i: slot_min[i])
+    _, name, emoji, blurb = PERSONAS[peak]
+    persona = {"name": name, "emoji": emoji, "blurb": blurb,
+               "share": round(slot_min[peak] / total_min * 100)}
+
+    # Discoveries: artists / songs never played before this period.
+    new_artist_min = defaultdict(float)
+    new_song_plays = defaultdict(int)
+    new_song_meta = {}
+    for r in recs:
+        if r["artist"] not in seen_artists:
+            new_artist_min[r["artist"]] += dur(r) / 60
+        k = song_key(r)
+        if k not in seen_songs:
+            new_song_plays[k] += 1
+            new_song_meta.setdefault(k, {"name": r.get("saavn_name") or r["title"], "artist": r["artist"], "image": r.get("image")})
+    top_new_artist = max(new_artist_min.items(), key=lambda x: x[1], default=None)
+    top_new_song = max(new_song_plays.items(), key=lambda x: x[1], default=None)
+    discovery = {
+        "first_period": is_first_period,
+        "new_artists": len(new_artist_min),
+        "new_songs": len(new_song_plays),
+        "new_song_share": round(sum(new_song_plays.values()) / len(recs) * 100),
+        "top_new_artist": {"name": top_new_artist[0], "minutes": round(top_new_artist[1], 1)} if top_new_artist else None,
+        "top_new_song": {**new_song_meta[top_new_song[0]], "plays": top_new_song[1]} if top_new_song else None,
+    }
+
+    # On repeat: the song you looped the most within a single day.
+    per_day_song = defaultdict(int)
+    for r in recs:
+        per_day_song[(r["date"], song_key(r))] += 1
+    (rep_date, rep_key), rep_plays = max(per_day_song.items(), key=lambda x: x[1])
+    rep = next(r for r in recs if r["date"] == rep_date and song_key(r) == rep_key)
+    on_repeat = {"name": rep.get("saavn_name") or rep["title"], "artist": rep["artist"], "image": rep.get("image"),
+                 "plays": rep_plays, "date": _day_label(rep["timestamp"])} if rep_plays >= 3 else None
+
+    # Biggest day.
+    day_min, day_plays, day_ts = defaultdict(float), defaultdict(int), {}
+    for r in recs:
+        day_min[r["date"]] += dur(r) / 60
+        day_plays[r["date"]] += 1
+        day_ts.setdefault(r["date"], r["timestamp"])
+    big = max(day_min, key=day_min.get)
+    biggest_day = {"date": _day_label(day_ts[big]), "weekday": f"{day_ts[big]:%A}",
+                   "minutes": round(day_min[big], 1), "plays": day_plays[big]}
+
+    # Longest session: plays with no pause longer than SESSION_GAP between them.
+    best = cur = None
+    for r in recs:
+        if cur and r["timestamp"] - cur["last"] <= SESSION_GAP:
+            cur["minutes"] += dur(r) / 60
+            cur["tracks"] += 1
+            cur["last"] = r["timestamp"]
+        else:
+            cur = {"start": r["timestamp"], "last": r["timestamp"], "minutes": dur(r) / 60, "tracks": 1}
+        if not best or cur["minutes"] > best["minutes"]:
+            best = dict(cur)
+    longest_session = {"minutes": round(best["minutes"], 1), "tracks": best["tracks"],
+                       "date": _day_label(best["start"]), "start": _time_label(best["start"])}
+
+    # Listening streak: most consecutive days with at least one play.
+    days = sorted({r["timestamp"].date() for r in recs})
+    run = best_run = 1
+    run_start = best_start = best_end = days[0]
+    for prev, d in zip(days, days[1:]):
+        if (d - prev).days == 1:
+            run += 1
+        else:
+            run, run_start = 1, d
+        if run > best_run:
+            best_run, best_start, best_end = run, run_start, d
+    listening_streak = {"days": best_run, "start": _day_label(best_start), "end": _day_label(best_end)}
+
+    return {"persona": persona, "discovery": discovery, "on_repeat": on_repeat,
+            "biggest_day": biggest_day, "longest_session": longest_session,
+            "listening_streak": listening_streak}
+
 def compute_full_history(records, durations):
     history = [{
         "title":            r.get("saavn_name") or r["title"],
@@ -1274,6 +1389,16 @@ def analyze():
 
         set_progress(user_id, "Crunching your stats...")
 
+        # Timestamps are stored in UTC. Bucket months/days/hours in the
+        # listener's own timezone (sent by the browser), otherwise e.g. IST
+        # morning listening shows up as "Late Night" and plays land on the
+        # wrong day. Done after save_history so stored data stays UTC.
+        local_tz = get_user_tz(body.get("tz"))
+        for r in records:
+            r["timestamp"] = r["timestamp"].astimezone(local_tz)
+            r["year_month"] = r["timestamp"].strftime("%Y-%m")
+            r["date"] = r["timestamp"].strftime("%Y-%m-%d")
+
         # Build durations map using local cache
         durations = {}
 
@@ -1300,11 +1425,16 @@ def analyze():
         cumulative_minutes = 0
         cumulative_songs = set()
         cumulative_artists = set()
+        # Everything played before the current period, for "Discoveries".
+        seen_artists, seen_song_keys = set(), set()
 
         for mk in months_sorted:
             mrs = months[mk]
             y, mo = map(int, mk.split("-"))
-            
+            highlights = compute_highlights(mrs, durations, seen_artists, seen_song_keys, mk == months_sorted[0])
+            seen_artists.update(r["artist"] for r in mrs)
+            seen_song_keys.update(song_key(r) for r in mrs)
+
             # Monthly calculations
             monthly_plays = len(mrs)
             monthly_minutes = sum(durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60 for r in mrs)
@@ -1338,12 +1468,17 @@ def analyze():
                 "weekly_breakdown": compute_weekly_breakdown(mrs, durations, y, mo),
                 "day_of_week":      compute_day_of_week(mrs, durations),
                 "hour_heatmap":     compute_hour_heatmap(mrs, durations),
+                "highlights":       highlights,
                 "history":          compute_full_history(mrs, durations),
             }
 
+        seen_artists, seen_song_keys = set(), set()
         for yk in years_sorted:
             yrs = years[yk]
-            
+            highlights = compute_highlights(yrs, durations, seen_artists, seen_song_keys, yk == years_sorted[0])
+            seen_artists.update(r["artist"] for r in yrs)
+            seen_song_keys.update(song_key(r) for r in yrs)
+
             yearly_plays = len(yrs)
             yearly_minutes = sum(durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60 for r in yrs)
             yearly_songs = set(r["video_id"] for r in yrs)
@@ -1361,9 +1496,10 @@ def analyze():
                 "top_music_directors": compute_top_music_directors(yrs, durations),
                 "streak":           compute_streak(yrs),
                 "throwback":        None,
-                "monthly_breakdown": compute_monthly_breakdown(yrs, durations, y), 
+                "monthly_breakdown": compute_monthly_breakdown(yrs, durations, int(yk)),
                 "day_of_week":      compute_day_of_week(yrs, durations),
                 "hour_heatmap":     compute_hour_heatmap(yrs, durations),
+                "highlights":       highlights,
                 "history":          compute_full_history(yrs, durations),
             }
 

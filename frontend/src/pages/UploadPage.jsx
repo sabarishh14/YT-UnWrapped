@@ -58,7 +58,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
       const response = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries: [], user_id: userId, lastfm_username: lastFmUser }), 
+        body: JSON.stringify({ entries: [], user_id: userId, lastfm_username: lastFmUser, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       })
       clearInterval(pollId)
       if (!response.ok) throw new Error((await response.json()).error || 'Server error')
@@ -94,7 +94,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
       const response = await fetch(`${API_BASE}/api/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries, user_id: userId, lastfm_username: lastFmUser || "" }),
+        body: JSON.stringify({ entries, user_id: userId, lastfm_username: lastFmUser || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       })
       clearInterval(pollId)
       if (!response.ok) throw new Error((await response.json()).error || 'Server error')

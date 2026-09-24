@@ -1,0 +1,161 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 24px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  transition: transform var(--transition), background var(--transition);
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.wide {
+  grid-column: 1 / -1;
+  background: radial-gradient(circle at 0% 50%, rgba(255, 0, 0, 0.12) 0%, transparent 60%), rgba(255, 255, 255, 0.03);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+}
+
+.big {
+  font-size: clamp(30px, 5vw, 42px);
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  line-height: 1;
+  color: white;
+}
+
+.unit {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--yt-red);
+  letter-spacing: -0.5px;
+  margin-left: 8px;
+}
+
+.sub {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.sub strong,
+.footnote strong {
+  color: white;
+  font-weight: 600;
+}
+
+.footnote {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.persona {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.personaEmoji {
+  font-size: 56px;
+  line-height: 1;
+  filter: drop-shadow(0 0 20px rgba(255, 0, 0, 0.3));
+  flex-shrink: 0;
+}
+
+.personaName {
+  font-size: clamp(26px, 4vw, 34px);
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: white;
+  margin-bottom: 6px;
+}
+
+.track {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.art,
+.artFallback {
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.artFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 22px;
+}
+
+.trackText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.trackName {
+  font-size: 17px;
+  font-weight: 700;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackArtist {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+  .card { padding: 20px; }
+  .persona { gap: 14px; }
+  .personaEmoji { font-size: 44px; }
+}

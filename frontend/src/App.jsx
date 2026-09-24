@@ -128,7 +128,8 @@ export default function App() {
         entries: [], 
         user_id: uid, 
         lastfm_username: lfm || "",
-        quick_refresh: silent 
+        quick_refresh: silent,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone
       })
     })
       .then(res => res.json())
