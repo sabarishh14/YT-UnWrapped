@@ -636,7 +636,8 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
 
 def enrich_artists(records: list, user_id: str) -> None:
     seen, stale = {}, {}
-    for r in records:
+    # Newest first, so the plays you actually see at the top get fixed first.
+    for r in sorted(records, key=lambda x: x["timestamp"], reverse=True):
         title = r["title"]
         if title in seen or title in stale:
             continue
