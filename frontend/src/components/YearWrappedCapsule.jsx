@@ -4,6 +4,7 @@ import styles from './YearWrappedCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 import StoryMode from './StoryMode.jsx';
 import Highlights from './Highlights.jsx'
+import { apiFetch } from '../api.js'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -125,14 +126,12 @@ function HistorySection({ history, onRefresh, isReadOnly }) {
     // 1. Optimistic UI: Instantly vanish the row from the screen
     setHiddenIds(prev => new Set(prev).add(video_id))
 
-    const user_id = auth.currentUser?.uid
-    if (!user_id) return
+    if (!auth.currentUser) return
 
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || ''}/api/hide_track`, {
+      await apiFetch('/api/hide_track', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id, video_id })
+        body: JSON.stringify({ video_id })
       })
       
       // 2. Tell the Navbar to update the hidden list!
@@ -267,15 +266,12 @@ export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadO
   const handleShareLink = async () => {
     setIsSharing(true);
     try {
-      const user_id = auth.currentUser?.uid;
-      if (!user_id) throw new Error("Not logged in");
+      if (!auth.currentUser) throw new Error("Not logged in");
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/publish_link`, {
+      const response = await apiFetch('/api/publish_link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          user_id, 
-          month_label: yearLabel, 
+        body: JSON.stringify({
+          month_label: yearLabel,
           // Inject the user's name straight into the dashboard data payload!
           dashboard_data: { ...data, shared_by: auth.currentUser?.displayName || "A friend" } 
         })

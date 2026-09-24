@@ -7,7 +7,7 @@ import { auth, loginWithGoogle, logout } from './firebase.js'
 import { onAuthStateChanged } from 'firebase/auth'
 import SharedPage from './pages/SharedPage.jsx' // <--- Add this!
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from './api.js'
 
 export default function App() {
   const [analysisData, setAnalysisData] = useState(null)
@@ -58,7 +58,7 @@ export default function App() {
       const startTime = Date.now();
       pollId = setInterval(async () => {
         try {
-          const res = await fetch(`${API_BASE}/api/progress?user_id=${user.uid}`);
+          const res = await apiFetch('/api/progress');
           const data = await res.json();
           if (data.total > 0 && data.processed > 0) {
             const elapsedSec = (Date.now() - startTime) / 1000;
@@ -95,16 +95,15 @@ export default function App() {
     syncResultTimer.current = setTimeout(() => setSyncResult(''), 5000)
   }
 
-  const saveLastFmToServer = (uid, name) => {
-    fetch(`${API_BASE}/api/settings`, {
+  const saveLastFmToServer = (name) => {
+    apiFetch('/api/settings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: uid, lastfm_username: name })
+      body: JSON.stringify({ lastfm_username: name })
     }).catch(err => console.error('Failed to save Last.fm username:', err))
   }
 
   // The Silent Refresh Engine
-  const fetchCloudData = (uid, lfm, silent = false) => {
+  const fetchCloudData = (lfm, silent = false) => {
     if (syncInFlight.current) {
       // A sync is already running (background or manual) - don't fire a
       // second overlapping /api/analyze. The backend also guards against
@@ -121,12 +120,10 @@ export default function App() {
       setFileName("Syncing changes...");
     }
 
-    fetch(`${API_BASE}/api/analyze`, {
+    apiFetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        entries: [], 
-        user_id: uid, 
+      body: JSON.stringify({
+        entries: [],
         lastfm_username: lfm || "",
         quick_refresh: silent,
         tz: Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -184,20 +181,20 @@ export default function App() {
         // The Last.fm username is saved per account on the server, so it
         // follows you across browsers/devices. Pull it down to keep the UI
         // accurate; if only this browser knows it, push it up so it's saved.
-        fetch(`${API_BASE}/api/settings?user_id=${currentUser.uid}`)
+        apiFetch('/api/settings')
           .then(res => res.ok ? res.json() : null)
           .then(settings => {
             if (settings?.lastfm_username) {
               localStorage.setItem('yt_lastfm', settings.lastfm_username)
               setLastFmUser(settings.lastfm_username)
             } else if (storedLastFm) {
-              saveLastFmToServer(currentUser.uid, storedLastFm)
+              saveLastFmToServer(storedLastFm)
             }
           })
           .catch(() => {})
 
         // 1. Try to load the instant mathematical cache first!
-        fetch(`${API_BASE}/api/get_cache?user_id=${currentUser.uid}`)
+        apiFetch('/api/get_cache')
           .then(res => res.ok ? res.json() : Promise.reject('No cache'))
           .then(data => {
             if (!data.error && data.months_available) {
@@ -208,14 +205,14 @@ export default function App() {
               setIsFetchingCloud(false); // Drop the loading screen instantly
               
               // 2. Silently sync Last.fm in the background!
-              fetchCloudData(currentUser.uid, storedLastFm, true); 
+              fetchCloudData(storedLastFm, true);
             } else {
               throw new Error("Invalid cache");
             }
           })
           .catch(() => {
             // 3. If no cache exists (first time login), do a normal, loud boot
-            fetchCloudData(currentUser.uid, storedLastFm, false);
+            fetchCloudData(storedLastFm, false);
           });
 
       } else {
@@ -237,7 +234,7 @@ export default function App() {
   const handleSaveLastFm = (name) => {
     localStorage.setItem('yt_lastfm', name)
     setLastFmUser(name)
-    if (user) saveLastFmToServer(user.uid, name)
+    if (user) saveLastFmToServer(name)
   }
 
   const handleGoBack = () => setAnalysisData(null)
@@ -248,11 +245,7 @@ export default function App() {
     if (!confirmed) return
 
     try {
-      await fetch(`${API_BASE}/api/clear`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user.uid })
-      })
+      await apiFetch('/api/clear', { method: 'POST' })
       // Clear local state so they drop back to the upload screen
       setAnalysisData(null)
       setFileName('')
@@ -447,7 +440,7 @@ export default function App() {
         onClear={user ? handleClearData : null}
         onLogout={user ? handleLogout : null}
         fileName={fileName}
-        onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, false)} // <--- CHANGED FROM TRUE TO FALSE
+        onRefresh={() => user && fetchCloudData(lastFmUser, false)}
         isSyncing={isSyncing}
         lastFmUser={lastFmUser}
       />
@@ -455,14 +448,13 @@ export default function App() {
       <main style={{ flex: 1 }}>
         {!analysisData
           ? <UploadPage 
-              onAnalysisComplete={handleAnalysisComplete} 
-              userId={user.uid} 
+              onAnalysisComplete={handleAnalysisComplete}
               lastFmUser={lastFmUser} 
               onSaveLastFm={handleSaveLastFm} 
             />
           : <DashboardPage 
               data={analysisData} 
-              onRefresh={() => user && fetchCloudData(user.uid, lastFmUser, true)}
+              onRefresh={() => user && fetchCloudData(lastFmUser, true)}
             />
         }
       </main>

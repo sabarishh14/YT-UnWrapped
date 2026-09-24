@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
 import styles from './UploadPage.module.css'
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
+import { apiFetch } from '../api.js'
 
-export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onSaveLastFm }) {
+export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastFm }) {
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -17,7 +17,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
 
     return setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/progress?user_id=${userId}`)
+        const res = await apiFetch('/api/progress')
         const data = await res.json()
         
         if (data.total > 0 && data.processed > 0) {
@@ -55,10 +55,9 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
     const pollId = startProgressPolling()
 
     try {
-      const response = await fetch(`${API_BASE}/api/analyze`, {
+      const response = await apiFetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries: [], user_id: userId, lastfm_username: lastFmUser, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        body: JSON.stringify({ entries: [], lastfm_username: lastFmUser, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       })
       clearInterval(pollId)
       if (!response.ok) throw new Error((await response.json()).error || 'Server error')
@@ -91,10 +90,9 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
       setLoadingMsg('Starting analysis...')
       const pollId = startProgressPolling()
 
-      const response = await fetch(`${API_BASE}/api/analyze`, {
+      const response = await apiFetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries, user_id: userId, lastfm_username: lastFmUser || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+        body: JSON.stringify({ entries, lastfm_username: lastFmUser || "", tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
       })
       clearInterval(pollId)
       if (!response.ok) throw new Error((await response.json()).error || 'Server error')
@@ -107,7 +105,7 @@ export default function UploadPage({ onAnalysisComplete, userId, lastFmUser, onS
       setError(err.message || 'Something went wrong.')
       setLoading(false)
     }
-  }, [onAnalysisComplete, userId, lastFmUser])
+  }, [onAnalysisComplete, lastFmUser])
   
   const onDrop = useCallback((e) => {
     e.preventDefault()

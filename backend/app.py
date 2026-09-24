@@ -11,7 +11,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from flask import Flask, request, jsonify
+from functools import wraps
+from flask import Flask, request, jsonify, g
+import google.auth.jwt as google_jwt
 from flask_cors import CORS
 from dotenv import load_dotenv
 from ytmusicapi import YTMusic
@@ -1083,9 +1085,56 @@ def compute_full_history(records, durations):
     history.sort(key=lambda x: x["played_at"], reverse=True)
     return history
 
+# ── Auth ─────────────────────────────────────────────────
+# Every private endpoint used to trust a user_id sent in the request, so
+# anyone who learned someone's Firebase UID could read or wipe their data.
+# Now the browser sends its Firebase ID token and we derive the user from it.
+# Verifying only needs Google's public signing certs - no service account.
+
+FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID", "yt-u-6c26b")
+FIREBASE_CERTS_URL = "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com"
+_firebase_certs = {"certs": {}, "expires": 0.0}
+
+def _get_firebase_certs(force=False):
+    if force or time.time() >= _firebase_certs["expires"]:
+        resp = requests.get(FIREBASE_CERTS_URL, timeout=10)
+        resp.raise_for_status()
+        max_age = re.search(r"max-age=(\d+)", resp.headers.get("Cache-Control", ""))
+        _firebase_certs["certs"] = resp.json()
+        _firebase_certs["expires"] = time.time() + (int(max_age.group(1)) if max_age else 3600)
+    return _firebase_certs["certs"]
+
+def verify_firebase_token(token):
+    def decode(certs):
+        return google_jwt.decode(token, certs=certs, audience=FIREBASE_PROJECT_ID, clock_skew_in_seconds=60)
+    try:
+        claims = decode(_get_firebase_certs())
+    except ValueError:
+        # Google rotates its signing keys; retry once with a fresh set.
+        claims = decode(_get_firebase_certs(force=True))
+    if claims.get("iss") != f"https://securetoken.google.com/{FIREBASE_PROJECT_ID}" or not claims.get("sub"):
+        raise ValueError("token is not for this Firebase project")
+    return claims
+
+def require_auth(view):
+    @wraps(view)
+    def wrapper(*args, **kwargs):
+        header = request.headers.get("Authorization", "")
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Not signed in"}), 401
+        try:
+            claims = verify_firebase_token(header[len("Bearer "):])
+        except Exception as e:
+            app.logger.warning(f"Rejected sign-in token: {type(e).__name__}: {e}")
+            return jsonify({"error": "Your sign-in expired - please sign in again"}), 401
+        g.user_id = claims["sub"]
+        g.claims = claims
+        return view(*args, **kwargs)
+    return wrapper
+
 # ── Routes ───────────────────────────────────────────────
 
-API_VERSION = "1.1.0 (Compare & Year Wrapped Update)"
+API_VERSION = "1.2.0 (Friends & All-Time Update)"
 
 @app.route("/", methods=["GET"])
 def index():
@@ -1096,17 +1145,16 @@ def index():
     })
 
 @app.route("/api/clear", methods=["POST"])
+@require_auth
 def clear_data():
     try:
-        body = request.get_json(force=True)
-        user_id = body.get("user_id", "").strip()
-        
-        if not user_id:
-            return jsonify({"error": "No user ID provided"}), 400
-            
+        user_id = g.user_id
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM listens WHERE username = %s", (user_id,))
+                # Without this the cached dashboard kept coming back on the
+                # next login even after "Clear Data".
+                cur.execute("DELETE FROM user_cache WHERE username = %s", (user_id,))
             conn.commit()
             
         return jsonify({"status": "success", "message": "User data cleared."})
@@ -1157,18 +1205,12 @@ def save_lastfm_username(user_id, lastfm_username):
         conn.commit()
 
 @app.route("/api/settings", methods=["GET", "POST"])
+@require_auth
 def user_settings():
     if request.method == "GET":
-        user_id = request.args.get("user_id", "").strip()
-        if not user_id:
-            return jsonify({"error": "Missing user_id"}), 400
-        return jsonify({"lastfm_username": get_saved_lastfm_username(user_id)})
-
+        return jsonify({"lastfm_username": get_saved_lastfm_username(g.user_id)})
     body = request.get_json(force=True)
-    user_id = body.get("user_id", "").strip()
-    if not user_id:
-        return jsonify({"error": "Missing user_id"}), 400
-    save_lastfm_username(user_id, body.get("lastfm_username", "").strip())
+    save_lastfm_username(g.user_id, (body.get("lastfm_username") or "").strip())
     return jsonify({"status": "success"})
 
 def get_cached_dashboard(user_id):
@@ -1181,22 +1223,21 @@ def get_cached_dashboard(user_id):
     return None
 
 @app.route("/api/progress", methods=["GET"])
+@require_auth
 def get_progress():
-    user_id = request.args.get("user_id")
-    if not user_id or user_id not in PROGRESS:
-        return jsonify({"message": "Idle", "processed": 0, "total": 0})
-    return jsonify(PROGRESS[user_id])
+    return jsonify(PROGRESS.get(g.user_id, {"message": "Idle", "processed": 0, "total": 0}))
 
 @app.route("/api/hide_track", methods=["POST"])
+@require_auth
 def hide_track():
     try:
         body = request.get_json(force=True)
-        user_id = body.get("user_id")
+        user_id = g.user_id
         video_id = body.get("video_id")
-        
-        if not user_id or not video_id:
-            return jsonify({"error": "Missing user_id or video_id"}), 400
-            
+
+        if not video_id:
+            return jsonify({"error": "Missing video_id"}), 400
+
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 # Save it to the DB (DO NOTHING if they accidentally click it twice)
@@ -1214,16 +1255,16 @@ def hide_track():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/hidden_tracks", methods=["GET"])
+@require_auth
 def get_hidden_tracks():
-    user_id = request.args.get("user_id")
-    if not user_id: return jsonify({"error": "Missing user_id"}), 400
+    user_id = g.user_id
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Grab the video ID, and the most recent title/artist associated with it
+            # Grab the video ID, and a title/artist from this user's own plays of it
             cur.execute("""
-                SELECT h.video_id, 
-                       (SELECT l.title FROM listens l WHERE l.video_id = h.video_id LIMIT 1),
-                       (SELECT l.record_data->>'artist' FROM listens l WHERE l.video_id = h.video_id LIMIT 1)
+                SELECT h.video_id,
+                       (SELECT l.title FROM listens l WHERE l.video_id = h.video_id AND l.username = h.username LIMIT 1),
+                       (SELECT l.record_data->>'artist' FROM listens l WHERE l.video_id = h.video_id AND l.username = h.username LIMIT 1)
                 FROM hidden_tracks h
                 WHERE h.username = %s
             """, (user_id,))
@@ -1231,10 +1272,11 @@ def get_hidden_tracks():
     return jsonify({"hidden_tracks": tracks})
 
 @app.route("/api/unhide_track", methods=["POST"])
+@require_auth
 def unhide_track():
     try:
         body = request.get_json(force=True)
-        user_id = body.get("user_id")
+        user_id = g.user_id
         video_id = body.get("video_id")
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -1245,14 +1287,15 @@ def unhide_track():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/publish_link", methods=["POST"])
+@require_auth
 def publish_link():
     try:
         body = request.get_json(force=True)
-        user_id = body.get("user_id")
+        user_id = g.user_id
         month_label = body.get("month_label")
         dashboard_data = body.get("dashboard_data") # We will send the specific month's data
-        
-        if not user_id or not dashboard_data:
+
+        if not dashboard_data:
             return jsonify({"error": "Missing data"}), 400
             
         # Generate a short, unique 8-character token (e.g. "a1b2c3d4")
@@ -1295,13 +1338,13 @@ def get_shared_link(token):
     
 # ─────────────────────────────────────────────────────────
 @app.route("/api/analyze", methods=["POST"])
+@require_auth
 def analyze():
-    user_id = ""  # bound up-front so the finally block below is always safe
+    user_id = g.user_id
     my_sync_start = None
     try:
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
-        user_id = body.get("user_id", "").strip()
         lastfm_username = (body.get("lastfm_username") or "").strip()
         quick_refresh = body.get("quick_refresh", False) # <--- NEW FLAG
 
@@ -1549,11 +1592,10 @@ def analyze():
 
 # --- NEW: Ultra-fast route just to grab the cached JSON ---
 @app.route("/api/get_cache", methods=["GET"])
+@require_auth
 def get_cache():
-    user_id = request.args.get("user_id")
-    if not user_id: return jsonify({"error": "Missing user_id"}), 400
     try:
-        cached = get_cached_dashboard(user_id)
+        cached = get_cached_dashboard(g.user_id)
         if cached:
             return jsonify(cached)
         return jsonify({"error": "No cache found"}), 404

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { auth } from '../firebase.js'
+import { apiFetch } from '../api.js'
 import styles from './Navbar.module.css';
 
 const GearIcon = () => (
@@ -20,12 +21,11 @@ const YTMusicIcon = () => (
 export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefresh, isSyncing, lastFmUser }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [hiddenTracks, setHiddenTracks] = useState([]);
-  const API_BASE = import.meta.env.VITE_API_URL || "";
 
   // 1. Fetch tracks instantly in the background so the modal never has to load!
   const fetchHiddenTracks = () => {
     if (auth.currentUser) {
-       fetch(`${API_BASE}/api/hidden_tracks?user_id=${auth.currentUser.uid}`)
+       apiFetch('/api/hidden_tracks')
          .then(res => res.json())
          .then(data => setHiddenTracks(data.hidden_tracks || []))
          .catch(err => console.error(err));
@@ -48,10 +48,9 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
     setHiddenTracks(prev => prev.filter(t => t.video_id !== video_id)); 
     
     // Tell the backend to restore it
-    await fetch(`${API_BASE}/api/unhide_track`, {
+    await apiFetch('/api/unhide_track', {
        method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({ user_id: auth.currentUser.uid, video_id })
+       body: JSON.stringify({ video_id })
     });
     
     // Silently refresh the dashboard stats
