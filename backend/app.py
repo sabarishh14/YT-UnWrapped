@@ -193,10 +193,16 @@ JUNK_ARTISTS = {
 }
 
 def fetch_lastfm_scrobbles(username, from_ts=None):
-    if not LASTFM_API_KEY or not username:
-        return []
-        
+    """Returns (records, error). error is None on success, otherwise a short
+    description of why the fetch stopped - previously failures here were
+    silent, which made "sync ran but nothing new showed up" undebuggable."""
+    if not LASTFM_API_KEY:
+        return [], "LASTFM_API_KEY is not set on the server"
+    if not username:
+        return [], "no Last.fm username for this account"
+
     new_records = []
+    error = None
     page = 1
     total_pages = 1
     
@@ -217,9 +223,16 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
         try:
             resp = requests.get("https://ws.audioscrobbler.com/2.0/", params=params, timeout=10)
             if not resp.ok:
+                error = f"Last.fm HTTP {resp.status_code} on page {page}: {resp.text[:200]}"
+                app.logger.warning(error)
                 break
-                
-            data = resp.json().get("recenttracks", {})
+
+            payload = resp.json()
+            if "error" in payload:
+                error = f"Last.fm API error {payload.get('error')} on page {page}: {payload.get('message')}"
+                app.logger.warning(error)
+                break
+            data = payload.get("recenttracks", {})
             
             # Update the total pages on the first request
             if page == 1:
@@ -260,10 +273,12 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
             time.sleep(0.1) # Be nice to the Last.fm API
             
         except Exception as e:
-            app.logger.warning(f"LastFM fetch error on page {page}: {e}")
+            error = f"Last.fm fetch failed on page {page}: {type(e).__name__}: {e}"
+            app.logger.warning(error)
             break
-            
-    return new_records
+
+    app.logger.info(f"Last.fm fetch for '{username}' from_ts={from_ts}: {len(new_records)} scrobbles, error={error}")
+    return new_records, error
 
 def load_cache():
     global ARTIST_CACHE
@@ -1169,15 +1184,22 @@ def analyze():
         # between Takeout uploads, so skipping it here silently stopped new
         # plays from ever being pulled in.
         lfm_records = []
+        last_ts = None
+        lfm_error = None if lastfm_username else "no Last.fm username for this account"
         if lastfm_username:
-            last_ts = None
             if merged_records:
                 now_utc = datetime.now(timezone.utc)
                 valid_records = [x for x in merged_records if x["timestamp"] <= now_utc]
                 if valid_records:
                     latest_record = max(valid_records, key=lambda x: x["timestamp"])
                     last_ts = int(latest_record["timestamp"].timestamp()) + 1
-            lfm_records = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts)
+            lfm_records, lfm_error = fetch_lastfm_scrobbles(lastfm_username, from_ts=last_ts)
+        sync_info = {
+            "lastfm_username": lastfm_username or None,
+            "fetched_from": datetime.fromtimestamp(last_ts, tz=timezone.utc).isoformat() if last_ts else None,
+            "lastfm_fetched": len(lfm_records),
+            "lastfm_error": lfm_error,
+        }
             
         # 5. Merge Last.fm scrobbles
         records = merge_records(lfm_records, merged_records)
@@ -1330,7 +1352,7 @@ def analyze():
                     """, (user_id, json.dumps(response_payload)))
                 conn.commit()
 
-        return jsonify(response_payload)
+        return jsonify({**response_payload, "sync_info": sync_info})
 
     except Exception as e:
         app.logger.error(f"Analysis error: {e}", exc_info=True)
