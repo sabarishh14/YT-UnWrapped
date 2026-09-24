@@ -128,7 +128,12 @@ export default function App() {
           startTransition(() => {
             setAnalysisData(data);
             const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            setFileName(`Cloud Data (Synced: ${timeStr})`);
+            const info = data.sync_info || {};
+            let detail = '';
+            if (info.skipped) detail = ' - another sync was already running';
+            else if (info.lastfm_error) detail = ` - Last.fm: ${info.lastfm_error}`;
+            else if (info.lastfm_username) detail = ` - ${info.lastfm_fetched} new from Last.fm`;
+            setFileName(`Synced ${timeStr}${detail}`);
           });
         } else if (data.error && silent) {
           // A silent background sync failed - don't blow away the dashboard

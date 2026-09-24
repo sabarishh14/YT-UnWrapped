@@ -979,7 +979,16 @@ PROGRESS = {}
 # overlapping while Render's free tier is cold-starting). Without this, both
 # requests race on the shared PROGRESS[user_id] dict and whichever finishes
 # first pops the entry out from under the other, crashing it with a KeyError.
-ACTIVE_SYNCS = set()
+ACTIVE_SYNCS = {}  # user_id -> time.time() the sync started
+
+# A sync that hangs (e.g. a stuck network call) never reaches its finally
+# block, and gthread workers don't kill hung threads - so without an expiry
+# the user would stay "locked" and get stale cached data until a restart.
+SYNC_LOCK_TTL = 180
+
+def sync_in_progress(user_id):
+    started = ACTIVE_SYNCS.get(user_id)
+    return started is not None and time.time() - started < SYNC_LOCK_TTL
 
 def get_saved_lastfm_username(user_id):
     with get_db_connection() as conn:
@@ -1139,6 +1148,7 @@ def get_shared_link(token):
 @app.route("/api/analyze", methods=["POST"])
 def analyze():
     user_id = ""  # bound up-front so the finally block below is always safe
+    my_sync_start = None
     try:
         body = request.get_json(force=True)
         raw_entries = body.get("entries", [])
@@ -1149,13 +1159,14 @@ def analyze():
         # A sync for this user is already running (e.g. the background
         # silent sync and a manual Refresh overlapped) - don't run the
         # pipeline twice concurrently. Just hand back whatever's cached.
-        if user_id and user_id in ACTIVE_SYNCS:
+        if user_id and sync_in_progress(user_id):
             cached = get_cached_dashboard(user_id)
             if cached:
-                return jsonify(cached)
+                return jsonify({**cached, "sync_info": {"skipped": "another sync for this account is already running"}})
             return jsonify({"error": "A sync is already in progress for this account - try again in a moment."}), 409
         if user_id:
-            ACTIVE_SYNCS.add(user_id)
+            my_sync_start = time.time()
+            ACTIVE_SYNCS[user_id] = my_sync_start
 
         # Remember the Last.fm username per account, and fall back to it when
         # the browser doesn't send one (new device, cleared site data, etc).
@@ -1358,7 +1369,10 @@ def analyze():
         app.logger.error(f"Analysis error: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
     finally:
-        ACTIVE_SYNCS.discard(user_id)
+        # Only release our own lock - if we ran past the TTL, a newer sync
+        # may have taken over and we mustn't unlock it out from under it.
+        if my_sync_start is not None and ACTIVE_SYNCS.get(user_id) == my_sync_start:
+            ACTIVE_SYNCS.pop(user_id, None)
 
 # --- NEW: Ultra-fast route just to grab the cached JSON ---
 @app.route("/api/get_cache", methods=["GET"])
