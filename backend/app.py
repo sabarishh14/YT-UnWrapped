@@ -400,18 +400,60 @@ def yt_retry(func, *args, **kwargs):
 
 MAX_ENRICH_ATTEMPTS = 3  # give up on finding an image after this many tries
 
+# Bumped when the matching rules change. Cache entries from an older matcher
+# get re-checked once against the current rules (see cache_entry_status).
+MATCH_VERSION = 2
+
+TITLE_STOPWORDS = {
+    "the", "a", "an", "from", "ft", "feat", "featuring", "official", "video",
+    "audio", "lyric", "lyrics", "lyrical", "song", "full", "hd", "4k", "music",
+}
+
+def _title_words(s: str) -> list:
+    s = re.sub(r'\(.*?\)|\[.*?\]', ' ', (s or "").lower())
+    s = re.sub(r'[^\w\s]', ' ', s)
+    return [w for w in s.split() if w not in TITLE_STOPWORDS]
+
+def titles_match(source_title: str, found_title: str) -> bool:
+    """True if the found song title is (mostly) contained in the title we
+    started from. Direction matters: Takeout titles are noisy video titles
+    ("Kesariya - Brahmastra | Arijit Singh") that still contain the song
+    name, while a wrong match ("How Are You" for "Ammadi Aathadi") or a
+    different version ("Andangakka - Afropop Remix") brings in words the
+    source never had."""
+    found = _title_words(found_title)
+    if not found:
+        return False
+    source = set(_title_words(source_title))
+    return sum(w in source for w in found) / len(found) >= 0.6
+
+def cache_entry_status(title: str, entry) -> str:
+    """'ok' - use as-is; 'stale' - matched by an older, looser matcher and
+    fails the current title check, so look it up again; 'retry' - no image
+    yet and still worth another attempt."""
+    if not isinstance(entry, dict):
+        return "retry"
+    if (entry.get("match_v", 0) < MATCH_VERSION and entry.get("saavn_name")
+            and not titles_match(title, entry["saavn_name"])):
+        return "stale"
+    if entry.get("image") or entry.get("_enrich_attempts", 0) >= MAX_ENRICH_ATTEMPTS:
+        return "ok"
+    return "retry"
+
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     prior_attempts = 0
+    trust_video_id = True
     if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
         cached = ARTIST_CACHE[title]
-        # If the cached entry already has a thumbnail, return it immediately.
-        # If it doesn't, but we've already tried enough times, also return it
-        # as-is - some titles (live streams, junk Takeout entries) will never
-        # have a real thumbnail, and without this cap they'd get re-fetched
-        # from scratch on every single sync forever.
-        if cached.get("image") or cached.get("_enrich_attempts", 0) >= MAX_ENRICH_ATTEMPTS:
+        status = cache_entry_status(title, cached)
+        if status == "ok":
             return cached
-        prior_attempts = cached.get("_enrich_attempts", 0)
+        if status == "stale":
+            # The record's stored video_id was taken from this wrong match,
+            # so looking it up by ID would just return the wrong song again.
+            trust_video_id = False
+        else:
+            prior_attempts = cached.get("_enrich_attempts", 0)
 
     clean_title = re.sub(r'(?i)\(.*?lyrical.*?\)|\[.*?official.*?\]|\(.*?audio.*?\]|\(feat\..*?\)', '', title)
     clean_title = re.sub(r'\(.*?\)|\[.*?\]', '', clean_title).strip()
@@ -420,41 +462,34 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     meta = None
 
     # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
-    if video_id and not str(video_id).startswith("lfm_"):
+    if trust_video_id and video_id and not str(video_id).startswith("lfm_"):
         watch_playlist = yt_retry(ytmusic.get_watch_playlist, videoId=video_id)
         tracks = (watch_playlist or {}).get("tracks", [])
         if tracks:
             best_match = tracks[0]
-    
+
     # 2. If video ID lookup failed or returned nothing, fallback to text Search
     if not best_match:
         try:
-            search_query = f"{clean_title} {channel_artist}".strip() if not is_junk(channel_artist) else clean_title
-            
-            # Attempt 1: Strict "songs" search
-            results = yt_retry(ytmusic.search, search_query, filter="songs", limit=1)
-            
-            # Attempt 2: If that fails, it might be classified as a "video" (common for some tracks)
-            if not results:
-                results = yt_retry(ytmusic.search, search_query, filter="videos", limit=1)
-                
-            if not results and channel_artist:
-                results = yt_retry(ytmusic.search, clean_title, filter="songs", limit=1)
+            # Last.fm credits list everyone ("Yuvan Shankar Raja, Silambarasan
+            # TR, T. Rajendar, ..."), which drowns the title in the search.
+            # Title + main artist finds the right song far more reliably.
+            primary_artist = "" if is_junk(channel_artist) else (split_artists(channel_artist) or [""])[0]
+            queries = [(f"{clean_title} {primary_artist}".strip(), "songs"),
+                       (f"{clean_title} {primary_artist}".strip(), "videos")]
+            if primary_artist:
+                queries.append((clean_title, "songs"))
 
-            if results:
-                potential_match = results[0]
-                # SANITY CHECK: Does the found title or artist actually resemble our query?
-                found_title = potential_match.get('title', '').lower()
-                found_artists = " ".join([a['name'] for a in potential_match.get('artists', [])]).lower()
-                
-                query_words = set(clean_title.lower().split() + channel_artist.lower().split())
-                match_words = set(found_title.split() + found_artists.split())
-                
-                # If they share at least one meaningful word, accept it. Otherwise, reject the hallucination.
-                if len(query_words.intersection(match_words)) > 0:
-                    best_match = potential_match
-                else:
-                    app.logger.warning(f"Rejected false match: {clean_title} -> {found_title}")
+            for query, search_filter in queries:
+                results = yt_retry(ytmusic.search, query, filter=search_filter, limit=5) or []
+                # Take the first result whose TITLE matches. The old check
+                # accepted any shared word incl. artist names, so any song by
+                # the same composer passed and replaced the real one.
+                best_match = next((r for r in results[:5] if titles_match(title, r.get('title', ''))), None)
+                if best_match:
+                    break
+                if results:
+                    app.logger.warning(f"Rejected false match: {clean_title} -> {results[0].get('title', '')}")
         except Exception as e:
             app.logger.warning(f"[YTMusicAPI] Search failed for '{clean_title}': {e}")
 
@@ -532,6 +567,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
 
     if not meta.get("image"):
         meta["_enrich_attempts"] = prior_attempts + 1
+    meta["match_v"] = MATCH_VERSION
 
     # Save to Database and Return
     ARTIST_CACHE[title] = meta
@@ -599,22 +635,25 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
     return None
 
 def enrich_artists(records: list, user_id: str) -> None:
-    seen = {}
+    seen, stale = {}, {}
     for r in records:
-        cached_entry = ARTIST_CACHE.get(r["title"])
-        # Re-enrich if not cached at all, OR if cached but missing thumbnail -
-        # unless we've already given up on finding one for this title (see
-        # MAX_ENRICH_ATTEMPTS), otherwise unmatchable titles (live streams,
-        # junk Takeout entries) get retried from scratch on every sync forever.
-        needs_enrichment = (
-            not cached_entry
-            or not isinstance(cached_entry, dict)
-            or (not cached_entry.get("image") and cached_entry.get("_enrich_attempts", 0) < MAX_ENRICH_ATTEMPTS)
-        )
-        if needs_enrichment and r["title"] not in seen:
-            seen[r["title"]] = (r["artist"], r["video_id"])
+        title = r["title"]
+        if title in seen or title in stale:
+            continue
+        status = cache_entry_status(title, ARTIST_CACHE.get(title))
+        if status == "retry":
+            seen[title] = (r["artist"], r["video_id"])
+        elif status == "stale":
+            stale[title] = (r["artist"], r["video_id"])
 
-    uncached = [(title, art, vid) for title, (art, vid) in seen.items()]
+    # Wrong matches from the old matcher are re-checked a batch at a time so
+    # a single sync can't blow past the request timeout; the rest heal on
+    # later syncs. Genuinely new titles are never deferred.
+    STALE_PER_SYNC = 40
+    if stale:
+        app.logger.info(f"Re-checking {min(len(stale), STALE_PER_SYNC)} of {len(stale)} previously mismatched titles")
+    uncached = [(t, a, v) for t, (a, v) in seen.items()]
+    uncached += [(t, a, v) for t, (a, v) in list(stale.items())[:STALE_PER_SYNC]]
     
     global PROGRESS
     if user_id not in PROGRESS:
