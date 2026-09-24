@@ -5,11 +5,12 @@ import TopRankings from './TopRankings.jsx'
 import StoryMode from './StoryMode.jsx';
 import Highlights from './Highlights.jsx'
 import { apiFetch } from '../api.js'
+import ArtistAllTime from './ArtistAllTime.jsx'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
-  const h = Math.floor(mins / 60)
-  const m = Math.round(mins % 60)
+  const h = Math.floor(Math.round(mins) / 60)
+  const m = Math.round(mins) % 60
   if (h === 0) return `${m}m`
   if (m === 0) return `${h}h`
   return `${h}h ${m}m`
@@ -217,7 +218,7 @@ function HistorySection({ history, onRefresh, isReadOnly }) {
   )
 }
 
-export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadOnly = false }) {
+export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadOnly = false, artistProfiles }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
   const posterRef = React.useRef(null) 
@@ -317,9 +318,9 @@ export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadO
   const maxArtist = top_artists?.[0]?.minutes || 1
   const maxSong   = top_songs?.[0]?.plays || 1
   const maxDirector = top_music_directors?.[0]?.minutes || 1
-  const d_days = Math.floor(total_minutes / (60 * 24))
-  const d_hrs  = Math.floor((total_minutes % (60 * 24)) / 60)
-  const d_mins = Math.round(total_minutes % 60)
+  const d_days = Math.floor(Math.round(total_minutes) / (60 * 24))
+  const d_hrs  = Math.floor((Math.round(total_minutes) % (60 * 24)) / 60)
+  const d_mins = Math.round(total_minutes) % 60
   
   const formattedTime = d_days > 0 
       ? `${d_days} days, ${d_hrs}h ${d_mins}m` 
@@ -622,6 +623,9 @@ export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadO
                   ))}
                 </ol>
               )}
+              <div style={{ marginTop: '20px' }}>
+                <ArtistAllTime profile={artistProfiles?.[artistDetail]} />
+              </div>
             </div>
           </div>
         </div>

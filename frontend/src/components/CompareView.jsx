@@ -3,9 +3,9 @@ import styles from './CompareView.module.css'
 
 function formatDetailedTime(total_minutes) {
   if (!total_minutes || total_minutes === 0) return '0m'
-  const d_days = Math.floor(total_minutes / (60 * 24))
-  const d_hrs  = Math.floor((total_minutes % (60 * 24)) / 60)
-  const d_mins = Math.round(total_minutes % 60)
+  const d_days = Math.floor(Math.round(total_minutes) / (60 * 24))
+  const d_hrs  = Math.floor((Math.round(total_minutes) % (60 * 24)) / 60)
+  const d_mins = Math.round(total_minutes) % 60
   
   const parts = [];
   if (d_days > 0) parts.push(`${d_days}d`);
@@ -69,7 +69,42 @@ function Top5List({ title, myItems = [], friendItems = [], friendName }) {
   )
 }
 
-export default function CompareView({ myData, friendData, friendName, periodLabel, onGoBack }) {
+function TasteMatch({ blend, friendName }) {
+  const angle = Math.round((blend.score / 100) * 360)
+  return (
+    <div className={styles.cardFull}>
+      <h3 className={styles.cardTitle}>Taste Match</h3>
+      <div className={styles.blendRow}>
+        <div
+          className={styles.blendRing}
+          style={{ background: `conic-gradient(var(--yt-red) ${angle}deg, rgba(255,255,255,0.08) ${angle}deg)` }}
+        >
+          <div className={styles.blendRingInner}>
+            <span className={styles.blendScore}>{blend.score}%</span>
+          </div>
+        </div>
+        <div className={styles.blendText}>
+          <p className={styles.blendLabel}>{blend.label}</p>
+          <p className={styles.blendDesc}>Based on your all-time top artists and songs with {friendName}.</p>
+          {blend.shared_artists.length > 0 && (
+            <div className={styles.blendChips}>
+              <span className={styles.blendChipsLabel}>You both love</span>
+              {blend.shared_artists.map(a => <span key={a} className={styles.blendChip}>{a}</span>)}
+            </div>
+          )}
+          {blend.shared_songs.length > 0 && (
+            <div className={styles.blendChips}>
+              <span className={styles.blendChipsLabel}>Shared favourites</span>
+              {blend.shared_songs.map(s => <span key={s.name} className={styles.blendChip}>{s.name}</span>)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function CompareView({ myData, friendData, friendName, periodLabel, onGoBack, blend, lastSynced }) {
   if (!myData || !friendData) return null;
 
   const myMins = Math.round(myData.total_minutes || 0);
@@ -93,10 +128,16 @@ export default function CompareView({ myData, friendData, friendName, periodLabe
           <span className={styles.vsIcon}>⚔️</span>
           <span className={styles.nameBadgeOff}>{friendName}</span>
         </div>
+        {lastSynced && (
+          <p className={styles.syncedNote}>
+            {friendName}'s stats as of their last sync, {new Date(lastSynced).toLocaleDateString([], { day: 'numeric', month: 'short' })}
+          </p>
+        )}
       </div>
 
       <div className={styles.grid}>
-        
+        {blend && <TasteMatch blend={blend} friendName={friendName} />}
+
         {/* Playtime Battle */}
         <div className={styles.cardFull}>
           <h3 className={styles.cardTitle}>Total Playtime</h3>

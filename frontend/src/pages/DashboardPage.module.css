@@ -289,6 +289,147 @@
   align-items: center;
 }
 
+/* Year Wrapped + All-Time buttons side by side (stacked on phones) */
+.bigButtons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.capsuleHeader {
+  flex-wrap: wrap;
+}
+
+.comparePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(360px, 100%);
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.comparePanelLabel {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: var(--text-muted);
+}
+
+.compareHint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.friendChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.friendChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.friendChip:hover:not(:disabled) {
+  background: rgba(255, 60, 0, 0.18);
+  border-color: rgba(255, 60, 0, 0.5);
+}
+
+.friendChip:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.friendChip img,
+.friendInitial {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.friendInitial {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--yt-red);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.linkRow {
+  display: flex;
+  border-radius: 100px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.linkRow input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: white;
+  font-size: 13px;
+}
+
+.linkRow button {
+  padding: 0 18px;
+  background: var(--yt-red);
+  color: white;
+  border: none;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+
+.linkRow button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.compareError {
+  font-size: 13px;
+  color: #ffb3b3;
+  background: rgba(255, 0, 0, 0.1);
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.compareCancel {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
 @media (max-width: 640px) {
   .compareActionWrapper {
     width: auto;

@@ -7,6 +7,7 @@ import logging
 import requests
 import hashlib
 import uuid # <--- NEW: For generating secure share links
+import secrets
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -138,6 +139,24 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS user_settings (
                     username TEXT PRIMARY KEY,
                     lastfm_username TEXT
+                );
+            """)
+            # Friends: a public profile with a shareable friend code, and a
+            # symmetric friendship table (one row per direction).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    user_id TEXT PRIMARY KEY,
+                    display_name TEXT,
+                    photo_url TEXT,
+                    friend_code TEXT UNIQUE NOT NULL
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS friendships (
+                    user_id TEXT,
+                    friend_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, friend_id)
                 );
             """)
         conn.commit()
@@ -807,14 +826,14 @@ def merge_records(existing, new_records):
 
 # ── Analytics ────────────────────────────────────────────
 
-def compute_top_artists_by_minutes(records, durations):
+def compute_top_artists_by_minutes(records, durations, limit=10):
     artist_minutes = defaultdict(float)
     for r in records:
         dur = durations.get(r["video_id"], DEFAULT_TRACK_DURATION)
         for artist in r.get("artists", [r["artist"]]):
             artist_minutes[artist] += dur / 60
     sorted_a = sorted(artist_minutes.items(), key=lambda x: x[1], reverse=True)
-    return [{"name": a, "minutes": round(m, 1)} for a, m in sorted_a[:10]]
+    return [{"name": a, "minutes": round(m, 1)} for a, m in sorted_a[:limit]]
 
 def compute_top_music_directors(records, durations):
     md_minutes = defaultdict(float)
@@ -826,7 +845,7 @@ def compute_top_music_directors(records, durations):
     sorted_md = sorted(md_minutes.items(), key=lambda x: x[1], reverse=True)
     return [{"name": a, "minutes": round(m, 1)} for a, m in sorted_md[:10]]
 
-def compute_top_songs_by_plays(records, durations):
+def compute_top_songs_by_plays(records, durations, limit=10):
     song_plays  = defaultdict(int)
     song_meta = {}
     for r in records:
@@ -840,11 +859,10 @@ def compute_top_songs_by_plays(records, durations):
             if key not in song_meta:
                 # Join all the featured artists back together with a comma!
                 full_artist_string = ", ".join(r.get("artists", [r["artist"]]))
-                song_meta[key] = {"name": title, "artist": full_artist_string, "video_id": r["video_id"]}
-                
+                song_meta[key] = {"name": title, "artist": full_artist_string, "video_id": r["video_id"], "image": r.get("image")}
+
     sorted_s = sorted(song_plays.items(), key=lambda x: x[1], reverse=True)
-    return [{"name": song_meta[k]["name"], "artist": song_meta[k]["artist"], "plays": p, "video_id": song_meta[k]["video_id"]}
-            for k, p in sorted_s[:10]]
+    return [{**song_meta[k], "plays": p} for k, p in sorted_s[:limit]]
 
 def compute_streak(records):
     if not records:
@@ -1071,6 +1089,79 @@ def compute_highlights(records, durations, seen_artists, seen_songs, is_first_pe
     return {"persona": persona, "discovery": discovery, "on_repeat": on_repeat,
             "biggest_day": biggest_day, "longest_session": longest_session,
             "listening_streak": listening_streak}
+
+def compute_artist_profiles(records, durations, names):
+    """All-time deep-dive for the given artists: first listen, totals,
+    month-by-month minutes and their most-played songs. Counts every play
+    where they're credited or are the music director."""
+    profiles = {n: {"minutes": 0.0, "plays": 0, "first": None,
+                    "monthly": defaultdict(float), "songs": defaultdict(int)} for n in names}
+    for r in sorted(records, key=lambda x: x["timestamp"]):
+        mins = durations.get(r["video_id"], DEFAULT_TRACK_DURATION) / 60
+        credited = set(r.get("artists") or [r["artist"]]) | set(r.get("music_directors") or [])
+        for name in credited & profiles.keys():
+            p = profiles[name]
+            p["minutes"] += mins
+            p["plays"] += 1
+            p["first"] = p["first"] or r
+            p["monthly"][r["year_month"]] += mins
+            p["songs"][r.get("saavn_name") or r["title"]] += 1
+    out = {}
+    for name, p in profiles.items():
+        if not p["first"]:
+            continue
+        first = p["first"]
+        out[name] = {
+            "minutes": round(p["minutes"], 1),
+            "plays": p["plays"],
+            "first_heard": {"date": f"{_day_label(first['timestamp'])}, {first['timestamp'].year}",
+                            "song": first.get("saavn_name") or first["title"]},
+            "monthly": [{"month": m, "minutes": round(v, 1)} for m, v in sorted(p["monthly"].items())],
+            "top_songs": [{"name": s, "plays": n} for s, n in sorted(p["songs"].items(), key=lambda x: -x[1])[:5]],
+        }
+    return out
+
+def compute_all_time(records, durations, monthly_stats, yearly_stats):
+    if not records:
+        return None
+    first = min(records, key=lambda r: r["timestamp"])["timestamp"]
+    top_artists = compute_top_artists_by_minutes(records, durations, limit=50)
+
+    # "How your taste shifted": each month's #1 artist and song.
+    timeline = []
+    for mk in sorted(monthly_stats):
+        ms = monthly_stats[mk]
+        y, mo = map(int, mk.split("-"))
+        timeline.append({
+            "month": mk,
+            "label": f"{calendar.month_abbr[mo]} {y}",
+            "minutes": ms["total_minutes"],
+            "plays": ms["total_plays"],
+            "top_artist": (ms["top_artists"] or [{}])[0].get("name"),
+            "top_song": (ms["top_songs"] or [{}])[0].get("name"),
+        })
+
+    # Deep-dive profiles for everyone who shows up in any top list, so tapping
+    # an artist anywhere in the app has all-time details to show.
+    names = {a["name"] for a in top_artists[:100]}
+    for stats in list(monthly_stats.values()) + list(yearly_stats.values()):
+        names.update(a["name"] for a in stats["top_artists"] + stats["top_music_directors"])
+
+    return {
+        "total_plays": len(records),
+        "total_minutes": round(sum(durations.get(r["video_id"], DEFAULT_TRACK_DURATION) for r in records) / 60, 1),
+        "unique_songs": len({song_key(r) for r in records}),
+        "unique_artists": len({r["artist"] for r in records}),
+        "days_active": len({r["date"] for r in records}),
+        "since": f"{calendar.month_name[first.month]} {first.year}",
+        "top_artists": top_artists,
+        "top_songs": compute_top_songs_by_plays(records, durations, limit=50),
+        "top_albums": compute_top_albums_by_plays(records, durations),
+        "top_music_directors": compute_top_music_directors(records, durations),
+        "highlights": compute_highlights(records, durations, set(), set(), True),
+        "taste_timeline": timeline,
+        "artist_profiles": compute_artist_profiles(records, durations, names),
+    }
 
 def compute_full_history(records, durations):
     history = [{
@@ -1315,6 +1406,176 @@ def publish_link():
         app.logger.error(f"Error publishing link: {e}")
         return jsonify({"error": str(e)}), 500
 
+# ── Friends ──────────────────────────────────────────────
+
+FRIEND_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no 0/O/1/I lookalikes
+
+def ensure_profile(user_id, claims):
+    """Create/refresh the caller's public profile; returns their friend code."""
+    name = (claims.get("name") or "").strip() or "Music fan"
+    photo = claims.get("picture")
+    for _ in range(5):
+        code = "".join(secrets.choice(FRIEND_CODE_ALPHABET) for _ in range(6))
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO profiles (user_id, display_name, photo_url, friend_code)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (user_id) DO UPDATE
+                        SET display_name = EXCLUDED.display_name, photo_url = EXCLUDED.photo_url
+                        RETURNING friend_code
+                    """, (user_id, name, photo, code))
+                    row = cur.fetchone()
+                conn.commit()
+            return row[0] if row else None
+        except Exception as e:
+            if getattr(e, "pgcode", None) == "23505":  # unique_violation
+                continue  # friend code collision - try another
+            raise
+    raise RuntimeError("could not allocate a friend code")
+
+def find_profile_by_code(code):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, display_name, photo_url, friend_code FROM profiles WHERE friend_code = %s",
+                        ((code or "").strip().upper(),))
+            row = cur.fetchone()
+    return {"user_id": row[0], "name": row[1], "photo": row[2], "code": row[3]} if row else None
+
+def are_friends(user_id, friend_id):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM friendships WHERE user_id = %s AND friend_id = %s", (user_id, friend_id))
+            return cur.fetchone() is not None
+
+def get_cached_dashboard_with_time(user_id):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT dashboard_data, last_updated FROM user_cache WHERE username = %s", (user_id,))
+            row = cur.fetchone()
+    if not row or not row[0]:
+        return None, None
+    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    return data, row[1]
+
+def period_stats(dashboard, period):
+    """One period's stats for a friend to see - without the full play
+    history or artist deep-dives, which stay private to the owner."""
+    if not dashboard:
+        return None
+    if period == "all":
+        data = dashboard.get("all_time")
+    elif "-" in period:
+        data = (dashboard.get("monthly_stats") or {}).get(period)
+    else:
+        data = (dashboard.get("yearly_stats") or {}).get(period)
+    if not data:
+        return None
+    return {k: v for k, v in data.items() if k not in ("history", "artist_profiles")}
+
+def taste_match(mine, theirs):
+    """Blend-style score from overlapping all-time top artists and songs,
+    weighted by how much of each person's listening they make up."""
+    if not mine or not theirs:
+        return None
+
+    def shares(items, value):
+        total = sum(i[value] for i in items) or 1
+        return {i["name"].lower(): (i[value] / total, i) for i in items}
+
+    a1, a2 = shares(mine["top_artists"], "minutes"), shares(theirs["top_artists"], "minutes")
+    s1, s2 = shares(mine["top_songs"], "plays"), shares(theirs["top_songs"], "plays")
+    shared_a = a1.keys() & a2.keys()
+    shared_s = s1.keys() & s2.keys()
+    raw = (0.65 * sum(min(a1[k][0], a2[k][0]) for k in shared_a)
+           + 0.35 * sum(min(s1[k][0], s2[k][0]) for k in shared_s))
+    # Overlap of two people's weighted top lists is naturally small, so a
+    # square root spreads scores across a readable 0-100 range.
+    score = min(100, round(100 * raw ** 0.5))
+    label = ("Musical soulmates" if score >= 80 else "Very in sync" if score >= 60 else
+             "Plenty in common" if score >= 40 else "Some common ground" if score >= 20 else "Opposites attract")
+    by_combined = lambda d1, d2: sorted(d1.keys() & d2.keys(), key=lambda k: -(d1[k][0] + d2[k][0]))
+    return {
+        "score": score,
+        "label": label,
+        "shared_artists": [a1[k][1]["name"] for k in by_combined(a1, a2)[:5]],
+        "shared_songs": [{"name": s1[k][1]["name"], "artist": s1[k][1]["artist"]} for k in by_combined(s1, s2)[:5]],
+    }
+
+@app.route("/api/me", methods=["GET"])
+@require_auth
+def me():
+    code = ensure_profile(g.user_id, g.claims)
+    return jsonify({"friend_code": code, "display_name": g.claims.get("name")})
+
+@app.route("/api/friends", methods=["GET", "POST"])
+@require_auth
+def friends():
+    if request.method == "POST":
+        ensure_profile(g.user_id, g.claims)
+        friend = find_profile_by_code((request.get_json(force=True) or {}).get("code"))
+        if not friend:
+            return jsonify({"error": "No one has that friend code - double-check it"}), 404
+        if friend["user_id"] == g.user_id:
+            return jsonify({"error": "That's your own friend code"}), 400
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO friendships (user_id, friend_id) VALUES (%s, %s), (%s, %s)
+                    ON CONFLICT DO NOTHING
+                """, (g.user_id, friend["user_id"], friend["user_id"], g.user_id))
+            conn.commit()
+        return jsonify({"friend": {"code": friend["code"], "name": friend["name"], "photo": friend["photo"]}})
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.friend_code, p.display_name, p.photo_url, uc.last_updated
+                FROM friendships f
+                JOIN profiles p ON p.user_id = f.friend_id
+                LEFT JOIN user_cache uc ON uc.username = f.friend_id
+                WHERE f.user_id = %s
+                ORDER BY p.display_name
+            """, (g.user_id,))
+            rows = cur.fetchall()
+    return jsonify({"friends": [
+        {"code": r[0], "name": r[1], "photo": r[2], "last_synced": r[3].isoformat() if r[3] else None}
+        for r in rows
+    ]})
+
+@app.route("/api/friends/<code>", methods=["DELETE"])
+@require_auth
+def remove_friend(code):
+    friend = find_profile_by_code(code)
+    if friend:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM friendships
+                    WHERE (user_id = %s AND friend_id = %s) OR (user_id = %s AND friend_id = %s)
+                """, (g.user_id, friend["user_id"], friend["user_id"], g.user_id))
+            conn.commit()
+    return jsonify({"status": "success"})
+
+@app.route("/api/friends/<code>/compare", methods=["GET"])
+@require_auth
+def compare_with_friend(code):
+    friend = find_profile_by_code(code)
+    if not friend or not are_friends(g.user_id, friend["user_id"]):
+        return jsonify({"error": "You can only compare with people on your friends list"}), 403
+
+    period = (request.args.get("period") or "all").strip()
+    their_dashboard, their_updated = get_cached_dashboard_with_time(friend["user_id"])
+    my_dashboard = get_cached_dashboard(g.user_id)
+    return jsonify({
+        "friend": {"code": friend["code"], "name": friend["name"], "photo": friend["photo"]},
+        "period": period,
+        "data": period_stats(their_dashboard, period),
+        "last_synced": their_updated.isoformat() if their_updated else None,
+        "blend": taste_match((my_dashboard or {}).get("all_time"), (their_dashboard or {}).get("all_time")),
+    })
+
 @app.route("/api/shared/<token>", methods=["GET"])
 def get_shared_link(token):
     try:
@@ -1359,6 +1620,13 @@ def analyze():
         if user_id:
             my_sync_start = time.time()
             ACTIVE_SYNCS[user_id] = my_sync_start
+
+        # Keep the public profile (name/photo friends see) fresh. Never let a
+        # profile problem break the sync itself.
+        try:
+            ensure_profile(user_id, g.claims)
+        except Exception as e:
+            app.logger.warning(f"Profile refresh failed: {e}")
 
         # Remember the Last.fm username per account, and fall back to it when
         # the browser doesn't send one (new device, cleared site data, etc).
@@ -1558,6 +1826,7 @@ def analyze():
             "years_available":  sorted(years.keys()),
             "monthly_stats":    monthly_stats,
             "yearly_stats":     yearly_stats,
+            "all_time":         compute_all_time(records, durations, monthly_stats, yearly_stats),
             "summary": {
                 "total_plays":    len(records),
                 "unique_artists": len(set(r["artist"] for r in records)),

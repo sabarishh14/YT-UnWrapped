@@ -5,8 +5,8 @@ export default function TopRankings({ top_artists, top_songs, top_albums, top_mu
   // Helper to format minutes into "1h 20m" etc.
   const formatMinutes = (mins) => {
     if (!mins || mins === 0) return '0m'
-    const h = Math.floor(mins / 60)
-    const m = Math.round(mins % 60)
+    const h = Math.floor(Math.round(mins) / 60)
+    const m = Math.round(mins) % 60
     if (h === 0) return `${m}m`
     if (m === 0) return `${h}h`
     return `${h}h ${m}m`

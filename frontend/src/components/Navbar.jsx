@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { auth } from '../firebase.js'
 import { apiFetch } from '../api.js'
+import FriendsPanel from './FriendsPanel.jsx'
 import styles from './Navbar.module.css';
 
 const GearIcon = () => (
@@ -166,6 +167,11 @@ export default function Navbar({ onGoBack, onClear, onLogout, fileName, onRefres
                   {fileName}
                 </div>
               )}
+            </div>
+
+            <div className={styles.settingsSection} style={{ marginBottom: '16px' }}>
+              <h3>Friends</h3>
+              <FriendsPanel />
             </div>
 
             {/* 2. Account & Data Section */}

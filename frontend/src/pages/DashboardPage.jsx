@@ -1,25 +1,121 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import styles from './DashboardPage.module.css'
 import MonthCapsule from '../components/MonthCapsule.jsx'
 import YearWrappedCapsule from '../components/YearWrappedCapsule.jsx'
+import AllTimeCapsule from '../components/AllTimeCapsule.jsx'
 import CompareView from '../components/CompareView.jsx'
+import { apiFetch, API_BASE } from '../api.js'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const FULL_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
+const ALL_TIME = 'all'
+
+// VS Battle: pick a friend (live stats for this period) or paste a share link.
+function CompareAction({ period, onResult }) {
+  const [open, setOpen] = useState(false)
+  const [friends, setFriends] = useState(null)
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!open) return
+    apiFetch('/api/friends')
+      .then(res => res.json())
+      .then(d => setFriends(d.friends || []))
+      .catch(() => setFriends([]))
+  }, [open])
+
+  const compareWithFriend = async (friend) => {
+    setBusy(friend.code)
+    setError('')
+    try {
+      const res = await apiFetch(`/api/friends/${friend.code}/compare?period=${encodeURIComponent(period)}`)
+      const d = await res.json()
+      if (!res.ok) throw new Error(d.error)
+      if (!d.data) throw new Error(`${friend.name} doesn't have stats for this period yet.`)
+      onResult({ stats: d.data, name: friend.name, blend: d.blend, lastSynced: d.last_synced })
+    } catch (e) {
+      setError(e.message || "Couldn't load your friend's stats.")
+    }
+    setBusy(null)
+  }
+
+  const compareWithLink = async () => {
+    let t = token.trim()
+    if (!t) return
+    if (t.includes('/share/')) t = t.split('/share/')[1].split('?')[0]
+    setBusy('link')
+    setError('')
+    try {
+      const d = await (await fetch(`${API_BASE}/api/shared/${t}`)).json()
+      if (d.error) throw new Error(d.error)
+      onResult({ stats: d.dashboard_data, name: d.dashboard_data.shared_by || 'Friend' })
+    } catch (e) {
+      setError(e.message || "Failed to fetch friend's data.")
+    }
+    setBusy(null)
+  }
+
+  if (!open) {
+    return (
+      <div className={styles.compareActionWrapper}>
+        <button className={styles.compareToggleBtn} onClick={() => setOpen(true)}>⚔️ VS Battle</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className={styles.compareActionWrapper}>
+      <div className={styles.comparePanel}>
+        <p className={styles.comparePanelLabel}>Battle a friend</p>
+        {friends === null ? (
+          <span className={styles.spinner} />
+        ) : friends.length === 0 ? (
+          <p className={styles.compareHint}>No friends yet - add one with their friend code in Settings.</p>
+        ) : (
+          <div className={styles.friendChips}>
+            {friends.map(f => (
+              <button
+                key={f.code}
+                className={styles.friendChip}
+                disabled={!!busy}
+                onClick={() => compareWithFriend(f)}
+              >
+                {f.photo ? <img src={f.photo} alt="" referrerPolicy="no-referrer" /> : <span className={styles.friendInitial}>{f.name[0]}</span>}
+                {busy === f.code ? <span className={styles.spinner} /> : f.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className={styles.linkRow}>
+          <input
+            type="text"
+            placeholder="…or paste a share link"
+            value={token}
+            onChange={e => setToken(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && compareWithLink()}
+            disabled={!!busy}
+          />
+          <button onClick={compareWithLink} disabled={!!busy || !token.trim()}>
+            {busy === 'link' ? <span className={styles.spinner} /> : 'Go'}
+          </button>
+        </div>
+
+        {error && <p className={styles.compareError}>{error}</p>}
+        <button className={styles.compareCancel} onClick={() => { setOpen(false); setError('') }}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 export default function DashboardPage({ data, onRefresh }) {
-  const { months_available, monthly_stats, yearly_stats, summary } = data
+  const { months_available, monthly_stats, yearly_stats, summary, all_time } = data
 
   const [selectedMonth, setSelectedMonth] = useState(() => months_available[months_available.length - 1])
-  
-  // Compare State
-  const [isComparing, setIsComparing] = useState(false)
-  const [compareToken, setCompareToken] = useState("")
   const [friendData, setFriendData] = useState(null)
-  const [compareError, setCompareError] = useState("")
-  const [isCompareLoading, setIsCompareLoading] = useState(false)
-
-  // --- ADD THESE NEW LINES ---
   const [viewYear, setViewYear] = useState(() => months_available[months_available.length - 1].split('-')[0])
 
   const availableYears = useMemo(() => {
@@ -31,32 +127,21 @@ export default function DashboardPage({ data, onRefresh }) {
     return months_available.filter(m => m.startsWith(viewYear))
   }, [months_available, viewYear])
 
-  const isYearView = !selectedMonth.includes('-');
-  
+  const isAllTime = selectedMonth === ALL_TIME
+  const isYearView = !isAllTime && !selectedMonth.includes('-')
+
   const capsuleData = useMemo(() => {
+    if (isAllTime) return all_time
     return isYearView ? yearly_stats?.[selectedMonth] : monthly_stats?.[selectedMonth]
-  }, [monthly_stats, yearly_stats, selectedMonth, isYearView])
+  }, [monthly_stats, yearly_stats, all_time, selectedMonth, isYearView, isAllTime])
 
   const [year, month] = selectedMonth.split('-').map(Number)
+  const periodLabel = isAllTime ? 'All Time' : isYearView ? `${selectedMonth} Wrapped` : `${FULL_MONTH_NAMES[month - 1]} ${year}`
 
-  const handleCompare = async () => {
-    if (!compareToken.trim()) return;
-    setIsCompareLoading(true);
-    setCompareError("");
-    
-    let token = compareToken.trim();
-    if (token.includes('/share/')) token = token.split('/share/')[1].split('?')[0];
-    
-    try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/shared/${token}`);
-      const d = await res.json();
-      if (d.error) setCompareError(d.error);
-      else setFriendData(d);
-    } catch (e) {
-      setCompareError("Failed to fetch friend's data.");
-    }
-    setIsCompareLoading(false);
-  };
+  const select = (period) => {
+    setSelectedMonth(period)
+    setFriendData(null)
+  }
 
   return (
     <div className={styles.page}>
@@ -70,29 +155,38 @@ export default function DashboardPage({ data, onRefresh }) {
         </p>
       </div>
 
-      {/* ── Year Wrapped Section ── */}
-      {yearly_stats && yearly_stats[viewYear] && (
-        <div style={{ marginBottom: '12px' }}>
-          <button 
+      {/* ── Year Wrapped + All-Time ── */}
+      <div className={styles.bigButtons}>
+        {yearly_stats && yearly_stats[viewYear] && (
+          <button
             className={selectedMonth === viewYear ? styles.yearWrappedBtnActive : styles.yearWrappedBtn}
             style={{ marginTop: 0, padding: '20px', borderRadius: '24px' }}
-            onClick={() => { setSelectedMonth(viewYear); setFriendData(null); setIsComparing(false); }}
+            onClick={() => select(viewYear)}
           >
              ✨ View {viewYear} Year Wrapped ✨
           </button>
-        </div>
-      )}
+        )}
+        {all_time && (
+          <button
+            className={isAllTime ? styles.yearWrappedBtnActive : styles.yearWrappedBtn}
+            style={{ marginTop: 0, padding: '20px', borderRadius: '24px' }}
+            onClick={() => select(ALL_TIME)}
+          >
+            ∞ All-Time Stats
+          </button>
+        )}
+      </div>
 
       {/* ── Timeline Explorer ── */}
       <div className={styles.monthSection}>
         <div className={styles.yearScroller}>
-          {availableYears.map(year => (
+          {availableYears.map(y => (
             <button
-              key={year}
-              className={`${styles.yearChip} ${year === viewYear ? styles.yearChipActive : ''}`}
-              onClick={() => setViewYear(year)}
+              key={y}
+              className={`${styles.yearChip} ${y === viewYear ? styles.yearChipActive : ''}`}
+              onClick={() => setViewYear(y)}
             >
-              {year}
+              {y}
             </button>
           ))}
         </div>
@@ -100,12 +194,11 @@ export default function DashboardPage({ data, onRefresh }) {
         <div className={styles.monthGrid}>
           {monthsForViewYear.map(m => {
             const [, mo] = m.split('-').map(Number)
-            const isSelected = m === selectedMonth
             return (
               <button
                 key={m}
-                className={`${styles.monthChip} ${isSelected ? styles.monthChipActive : ''}`}
-                onClick={() => { setSelectedMonth(m); setFriendData(null); setIsComparing(false); }}
+                className={`${styles.monthChip} ${m === selectedMonth ? styles.monthChipActive : ''}`}
+                onClick={() => select(m)}
               >
                 {MONTH_NAMES[mo - 1]}
               </button>
@@ -115,122 +208,71 @@ export default function DashboardPage({ data, onRefresh }) {
       </div>
 
       {friendData && capsuleData ? (
-        <CompareView 
+        <CompareView
           myData={capsuleData}
-          friendData={friendData.dashboard_data}
-          friendName={friendData.dashboard_data.shared_by || "Friend"}
-          periodLabel={isYearView ? `${selectedMonth} Wrapped` : `${FULL_MONTH_NAMES[month - 1]} ${year}`}
-          onGoBack={() => { setFriendData(null); setIsComparing(false); setCompareToken(""); }}
+          friendData={friendData.stats}
+          friendName={friendData.name}
+          blend={friendData.blend}
+          lastSynced={friendData.lastSynced}
+          periodLabel={periodLabel}
+          onGoBack={() => setFriendData(null)}
         />
-      ) : (
-        <>
-          {capsuleData && !isYearView && (
-            <div className={styles.capsuleSection}>
-              <div className={styles.capsuleHeader}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                   <h2 className={styles.capsuleTitle}>
-                     <span className={styles.capTitleMonth}>{FULL_MONTH_NAMES[month - 1]}</span>
-                     <span className={styles.capTitleYear}>{year}</span>
-                   </h2>
-                   <div className={styles.capsuleBadge} style={{ alignSelf: 'flex-start' }}>Monthly Capsule</div>
-                </div>
-                
-                {/* Compare Action */}
-                <div className={styles.compareActionWrapper}>
-                  {!isComparing ? (
-                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ VS Battle</button>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '100%', width: '320px' }}>
-                      <div style={{ display: 'flex', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '100px', border: '1px solid rgba(255,255,255,0.2)', overflow: 'hidden' }}>
-                        <input 
-                          type="text" 
-                          placeholder="Paste Friend's Link..." 
-                          value={compareToken}
-                          onChange={(e) => setCompareToken(e.target.value)}
-                          disabled={isCompareLoading}
-                          style={{ flex: 1, padding: '12px 16px', background: 'transparent', color: 'white', border: 'none', outline: 'none', fontSize: '14px', minWidth: 0 }}
-                        />
-                        <button 
-                          disabled={isCompareLoading}
-                          onClick={handleCompare}
-                          style={{ padding: '0 20px', background: isCompareLoading ? 'rgba(255,0,0,0.5)' : 'var(--yt-red)', color: 'white', border: 'none', fontWeight: 700, cursor: isCompareLoading ? 'not-allowed' : 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '8px' }}
-                        >
-                          {isCompareLoading ? <span className={styles.spinner} /> : 'VS Battle'}
-                        </button>
-                      </div>
-                      <button onClick={() => { setIsComparing(false); setCompareError(""); }} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline', alignSelf: 'flex-start', paddingLeft: '16px' }}>Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              {compareError && <div style={{ color: '#ffb3b3', fontSize: '14px', background: 'rgba(255,0,0,0.1)', padding: '12px 16px', borderRadius: '8px' }}>Error: {compareError}</div>}
-              
-              <MonthCapsule 
-                data={capsuleData} 
-                monthLabel={`${FULL_MONTH_NAMES[month - 1]} ${year}`} 
-                onRefresh={onRefresh}
-              />
-            </div>
-          )}
-
-          {capsuleData && isYearView && (
-            <div className={styles.capsuleSection}>
-              <div className={styles.capsuleHeader}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      ) : capsuleData && (
+        <div className={styles.capsuleSection}>
+          <div className={styles.capsuleHeader}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {isAllTime ? (
+                <>
+                  <h2 className={styles.capsuleTitle}>
+                    <span className={styles.capTitleMonth}>All Time</span>
+                  </h2>
+                  <div className={styles.capsuleBadge} style={{ alignSelf: 'flex-start' }}>Lifetime</div>
+                </>
+              ) : isYearView ? (
+                <>
                   <h2 className={styles.capsuleTitle}>
                     <span className={styles.capTitleMonth}>{selectedMonth}</span>
                     <span className={styles.capTitleYear}>Wrapped</span>
                   </h2>
                   <div className={styles.capsuleBadge} style={{ background: 'rgba(255,0,0,0.15)', borderColor: 'rgba(255,0,0,0.4)', color: '#ffb3b3', alignSelf: 'flex-start'}}>Yearly Recap</div>
-                </div>
-
-                {/* Compare Action for Year */}
-                <div className={styles.compareActionWrapper}>
-                  {!isComparing ? (
-                    <button className={styles.compareToggleBtn} onClick={() => setIsComparing(true)}>⚔️ VS Battle</button>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxWidth: '100%', width: '320px' }}>
-                      <div style={{ display: 'flex', width: '100%', background: 'rgba(255,255,255,0.05)', borderRadius: '100px', border: '1px solid rgba(255,255,255,0.2)', overflow: 'hidden' }}>
-                        <input 
-                          type="text" 
-                          placeholder="Paste Friend's Link..." 
-                          value={compareToken}
-                          onChange={(e) => setCompareToken(e.target.value)}
-                          disabled={isCompareLoading}
-                          style={{ flex: 1, padding: '12px 16px', background: 'transparent', color: 'white', border: 'none', outline: 'none', fontSize: '14px', minWidth: 0 }}
-                        />
-                        <button 
-                          disabled={isCompareLoading}
-                          onClick={handleCompare}
-                          style={{ padding: '0 20px', background: isCompareLoading ? 'rgba(255,0,0,0.5)' : 'var(--yt-red)', color: 'white', border: 'none', fontWeight: 700, cursor: isCompareLoading ? 'not-allowed' : 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '8px' }}
-                        >
-                          {isCompareLoading ? <span className={styles.spinner} /> : 'VS Battle'}
-                        </button>
-                      </div>
-                      <button onClick={() => { setIsComparing(false); setCompareError(""); }} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '13px', textDecoration: 'underline', alignSelf: 'flex-start', paddingLeft: '16px' }}>Cancel</button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {compareError && <div style={{ color: '#ffb3b3', fontSize: '14px', background: 'rgba(255,0,0,0.1)', padding: '12px 16px', borderRadius: '8px' }}>Error: {compareError}</div>}
-
-              <YearWrappedCapsule 
-                data={capsuleData} 
-                yearLabel={selectedMonth} 
-                onRefresh={onRefresh}
-              />
+                </>
+              ) : (
+                <>
+                  <h2 className={styles.capsuleTitle}>
+                    <span className={styles.capTitleMonth}>{FULL_MONTH_NAMES[month - 1]}</span>
+                    <span className={styles.capTitleYear}>{year}</span>
+                  </h2>
+                  <div className={styles.capsuleBadge} style={{ alignSelf: 'flex-start' }}>Monthly Capsule</div>
+                </>
+              )}
             </div>
+
+            <CompareAction key={selectedMonth} period={selectedMonth} onResult={setFriendData} />
+          </div>
+
+          {isAllTime ? (
+            <AllTimeCapsule data={capsuleData} />
+          ) : isYearView ? (
+            <YearWrappedCapsule
+              data={capsuleData}
+              yearLabel={selectedMonth}
+              onRefresh={onRefresh}
+              artistProfiles={all_time?.artist_profiles}
+            />
+          ) : (
+            <MonthCapsule
+              data={capsuleData}
+              monthLabel={`${FULL_MONTH_NAMES[month - 1]} ${year}`}
+              onRefresh={onRefresh}
+              artistProfiles={all_time?.artist_profiles}
+            />
           )}
-        </>
+        </div>
       )}
 
-      {/* NEW: SB Creations Copyright Footer */}
       <div style={{ textAlign: 'center', marginTop: '40px', color: '#666', fontSize: '13px', fontWeight: '500', letterSpacing: '1px' }}>
         © {new Date().getFullYear()} SB Creations. All rights reserved.
       </div>
-      
     </div>
   )
 }

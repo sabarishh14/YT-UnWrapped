@@ -12,8 +12,8 @@ const PERSONA_WINDOW = {
 }
 
 function formatMinutes(mins) {
-  const h = Math.floor(mins / 60)
-  const m = Math.round(mins % 60)
+  const h = Math.floor(Math.round(mins) / 60)
+  const m = Math.round(mins) % 60
   if (h === 0) return `${m}m`
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }

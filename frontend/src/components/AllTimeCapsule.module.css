@@ -1,0 +1,236 @@
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 32px 28px;
+  border-radius: 28px;
+  background: radial-gradient(circle at 0% 0%, rgba(255, 0, 0, 0.16) 0%, transparent 60%), rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.pre {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+}
+
+.big {
+  font-size: clamp(48px, 9vw, 88px);
+  font-weight: 800;
+  letter-spacing: -3px;
+  line-height: 1;
+  color: white;
+  margin: 10px 0 8px;
+}
+
+.unit {
+  font-size: clamp(16px, 3vw, 22px);
+  font-weight: 500;
+  color: var(--yt-red);
+  letter-spacing: -0.5px;
+  margin-left: 10px;
+}
+
+.sub {
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+.heroStats {
+  display: flex;
+  gap: 28px;
+}
+
+.heroStat {
+  display: flex;
+  flex-direction: column;
+}
+
+.heroStatValue {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: white;
+}
+
+.heroStatLabel {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.mostPlayed {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  min-width: 0;
+}
+
+.mostPlayedArt,
+.mostPlayedArtFallback {
+  width: 72px;
+  height: 72px;
+  border-radius: 14px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.mostPlayedArtFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 28px;
+}
+
+.mostPlayedText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mostPlayedName {
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mostPlayedArtist {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mostPlayedCount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: white;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.mostPlayedCount span {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--yt-red);
+  margin-top: 4px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.timelineRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  min-width: 0;
+}
+
+.timelineRow:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.timelineMonth {
+  width: 72px;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.timelineMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.timelineArtist {
+  align-self: flex-start;
+  max-width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timelineArtist:hover {
+  color: #ff6b6b;
+}
+
+.timelineSong {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timelineBar {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.timelineFill {
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ff0000, #ff6b6b);
+}
+
+.timelineMins {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+@media (max-width: 480px) {
+  .hero { padding: 24px 20px; }
+  .heroStats { gap: 20px; }
+  .mostPlayed { gap: 14px; padding: 16px; }
+  .mostPlayedArt, .mostPlayedArtFallback { width: 56px; height: 56px; }
+  .mostPlayedName { font-size: 17px; }
+  .mostPlayedCount { font-size: 26px; }
+  .timelineRow { gap: 12px; padding: 10px 8px; }
+  .timelineMonth { width: 60px; }
+}
