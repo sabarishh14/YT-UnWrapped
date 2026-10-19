@@ -21,10 +21,9 @@ from ytmusicapi import YTMusic
 
 load_dotenv()
 
-# PROXY_URL is only needed to route around YouTube Music blocking datacenter
-# IPs. It is scoped to the ytmusic session and the YouTube Data API calls
-# below (not applied process-wide), so a dead/misconfigured proxy can't take
-# down unrelated calls like Last.fm or iTunes.
+# Optional proxy for YouTube Music, in case it blocks the server's IP. Only
+# YouTube Music and YouTube Data API calls use it (never Last.fm/iTunes), and
+# YouTube Music lookups fall back to a direct connection if it fails.
 PROXY_URL = os.environ.get("PROXY_URL")
 
 app = Flask(__name__)
@@ -253,7 +252,64 @@ if PROXY_URL:
     except Exception as e:
         app.logger.warning(f"Proxy -> music.youtube.com FAILED: {type(e).__name__}: {e}")
 
-ytmusic = YTMusic(requests_session=session)
+try:
+    _direct_probe = requests.get("https://music.youtube.com/", timeout=10)
+    app.logger.info(f"Direct -> music.youtube.com - status {_direct_probe.status_code}")
+except Exception as e:
+    app.logger.warning(f"Direct -> music.youtube.com FAILED: {type(e).__name__}: {e}")
+
+try:
+    from ytmusicapi.exceptions import YTMusicServerError
+except ImportError:
+    YTMusicServerError = ()
+
+# Network-level failures (as opposed to "no result for this song"). YouTube
+# answering 4xx/5xx (e.g. rate limiting) counts too.
+YTM_ROUTE_ERRORS = (requests.exceptions.RequestException,) + (
+    (YTMusicServerError,) if YTMusicServerError else ())
+YTM_BACKOFF = 300  # seconds to stop using a failed route
+
+class YTMusicUnavailable(Exception):
+    """Every route to YouTube Music failed - not the same as a song not
+    being found, so callers must not treat it as a real lookup attempt."""
+
+_ytm_proxied = YTMusic(requests_session=session) if PROXY_URL else None
+_ytm_direct = YTMusic(requests_session=TimeoutSession())
+_ytm_state = {"proxy_down_until": 0.0, "down_until": 0.0}
+
+def yt_call(method, *args, **kwargs):
+    """Call a ytmusicapi method via the proxy if one is configured and
+    working, else directly. A dead proxy used to fail every lookup silently
+    (the Webshare proxy stopped accepting us and albums went missing for
+    weeks), so a failed proxy now falls back to a direct connection.
+    Returns None when YouTube Music answered but the call itself failed;
+    raises YTMusicUnavailable when no route can reach it."""
+    now = time.time()
+    if now < _ytm_state["down_until"]:
+        raise YTMusicUnavailable("YouTube Music unreachable recently - backing off")
+    routes = []
+    if _ytm_proxied and now >= _ytm_state["proxy_down_until"]:
+        routes.append(("proxy", _ytm_proxied))
+    routes += [("direct", _ytm_direct), ("direct", _ytm_direct)]  # one retry for blips
+    last_err = None
+    for i, (label, client) in enumerate(routes):
+        try:
+            return getattr(client, method)(*args, **kwargs)
+        except YTM_ROUTE_ERRORS as e:
+            last_err = e
+            if label == "proxy":
+                _ytm_state["proxy_down_until"] = time.time() + YTM_BACKOFF
+                app.logger.warning(f"[YTMusic] proxy failed ({type(e).__name__}: {e}) - "
+                                   f"going direct for {YTM_BACKOFF}s")
+            elif i < len(routes) - 1:
+                time.sleep(0.4)
+        except Exception as e:
+            app.logger.warning(f"[YTMusic] {method} raised: {type(e).__name__}: {e}")
+            return None
+    _ytm_state["down_until"] = time.time() + YTM_BACKOFF
+    app.logger.warning(f"[YTMusic] unreachable ({type(last_err).__name__}: {last_err}) - "
+                       f"pausing lookups for {YTM_BACKOFF}s")
+    raise YTMusicUnavailable(str(last_err))
 
 
 DEFAULT_TRACK_DURATION = 210  # 3.5 min fallback
@@ -341,6 +397,8 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
                     "video_id": vid,
                     "artist": artist,
                     "artists": [artist],
+                    # Used when YouTube Music has no album for the song.
+                    "album": (t.get("album") or {}).get("#text") or None,
                     "timestamp": ts,
                     "year_month": ts.strftime("%Y-%m"),
                     "date": ts.strftime("%Y-%m-%d"),
@@ -456,26 +514,7 @@ def get_durations(video_ids):
                 DURATION_CACHE[v] = DEFAULT_TRACK_DURATION
     return {v: DURATION_CACHE.get(v, DEFAULT_TRACK_DURATION) for v in video_ids}
 
-def yt_retry(func, *args, **kwargs):
-    name = getattr(func, '__name__', func)
-    last_err = None
-    # Rotating proxies occasionally hand out a flaky exit IP for a single
-    # connection; one quick retry usually lands on a healthy one. Kept to
-    # 2 attempts total (not more) because lookup_metadata() can chain up to
-    # ~4 of these calls per track - each one retrying too aggressively risks
-    # a single track's lookup approaching gunicorn's 120s worker timeout,
-    # which would kill the whole /api/analyze request, not just that track.
-    for attempt in range(2):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            last_err = e
-            if attempt == 0:
-                time.sleep(0.4)
-    app.logger.warning(f"[YTMusicAPI] {name} raised after retry: {type(last_err).__name__}: {last_err}")
-    return None
-
-MAX_ENRICH_ATTEMPTS = 3  # give up on finding an image after this many tries
+MAX_ENRICH_ATTEMPTS = 3  # stop re-trying a title after this many real lookups
 
 # Bumped when the matching rules change. Cache entries from an older matcher
 # get re-checked once against the current rules (see cache_entry_status).
@@ -506,22 +545,26 @@ def titles_match(source_title: str, found_title: str) -> bool:
 
 def cache_entry_status(title: str, entry) -> str:
     """'ok' - use as-is; 'stale' - matched by an older, looser matcher and
-    fails the current title check, so look it up again; 'retry' - no image
-    yet and still worth another attempt."""
+    fails the current title check; 'unmatched' - YouTube Music never matched
+    it (so no album/duration), worth another try; 'retry' - no image yet."""
     if not isinstance(entry, dict):
         return "retry"
     if (entry.get("match_v", 0) < MATCH_VERSION and entry.get("saavn_name")
             and not titles_match(title, entry["saavn_name"])):
         return "stale"
-    if entry.get("image") or entry.get("_enrich_attempts", 0) >= MAX_ENRICH_ATTEMPTS:
+    if entry.get("_enrich_attempts", 0) >= MAX_ENRICH_ATTEMPTS:
         return "ok"
-    return "retry"
+    # A cover from the iTunes fallback used to mark a title as done, so songs
+    # looked up while YouTube Music was unreachable never got their album.
+    if not entry.get("real_video_id"):
+        return "unmatched"
+    return "ok" if entry.get("image") else "retry"
 
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     prior_attempts = 0
     trust_video_id = True
-    if title in ARTIST_CACHE and isinstance(ARTIST_CACHE[title], dict):
-        cached = ARTIST_CACHE[title]
+    cached = ARTIST_CACHE.get(title) if isinstance(ARTIST_CACHE.get(title), dict) else None
+    if cached:
         status = cache_entry_status(title, cached)
         if status == "ok":
             return cached
@@ -537,17 +580,18 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
 
     best_match = None
     meta = None
+    ytm_unavailable = False
 
-    # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
-    if trust_video_id and video_id and not str(video_id).startswith("lfm_"):
-        watch_playlist = yt_retry(ytmusic.get_watch_playlist, videoId=video_id)
-        tracks = (watch_playlist or {}).get("tracks", [])
-        if tracks:
-            best_match = tracks[0]
+    try:
+        # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
+        if trust_video_id and video_id and not str(video_id).startswith("lfm_"):
+            watch_playlist = yt_call("get_watch_playlist", videoId=video_id)
+            tracks = (watch_playlist or {}).get("tracks", [])
+            if tracks:
+                best_match = tracks[0]
 
-    # 2. If video ID lookup failed or returned nothing, fallback to text Search
-    if not best_match:
-        try:
+        # 2. If video ID lookup failed or returned nothing, fallback to text Search
+        if not best_match:
             # Last.fm credits list everyone ("Yuvan Shankar Raja, Silambarasan
             # TR, T. Rajendar, ..."), which drowns the title in the search.
             # Title + main artist finds the right song far more reliably.
@@ -558,7 +602,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
                 queries.append((clean_title, "songs"))
 
             for query, search_filter in queries:
-                results = yt_retry(ytmusic.search, query, filter=search_filter, limit=5) or []
+                results = yt_call("search", query, filter=search_filter, limit=5) or []
                 # Take the first result whose TITLE matches. The old check
                 # accepted any shared word incl. artist names, so any song by
                 # the same composer passed and replaced the real one.
@@ -567,18 +611,22 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
                     break
                 if results:
                     app.logger.warning(f"Rejected false match: {clean_title} -> {results[0].get('title', '')}")
-        except Exception as e:
-            app.logger.warning(f"[YTMusicAPI] Search failed for '{clean_title}': {e}")
+    except YTMusicUnavailable:
+        ytm_unavailable = True
+        if cached:
+            # Couldn't reach YouTube Music at all - keep what we had and try
+            # again on a later sync, rather than overwriting it with fallbacks.
+            return cached
 
     if best_match:
         artists = [a['name'] for a in best_match.get('artists', [])]
-        
+
         # --- Extract Music Directors and block junk like "Various Artists" ---
         music_directors = []
         album_info = best_match.get('album')
         if album_info and album_info.get('id'):
             try:
-                full_album = yt_retry(ytmusic.get_album, album_info['id'])
+                full_album = yt_call("get_album", album_info['id']) or {}
                 album_artists = [a['name'] for a in full_album.get('artists', [])]
                 
                 existing_lower = [a.lower() for a in artists]
@@ -642,7 +690,12 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
         else:
             print(f"   X FAILED! iTunes couldn't find a cover either.")
 
-    if not meta.get("image"):
+    if ytm_unavailable:
+        # Brand-new title during an outage: keep the fallback for now, but
+        # this wasn't a real attempt - it stays 'unmatched' and is retried.
+        if prior_attempts:
+            meta["_enrich_attempts"] = prior_attempts
+    elif not best_match or not meta.get("image"):
         meta["_enrich_attempts"] = prior_attempts + 1
     meta["match_v"] = MATCH_VERSION
 
@@ -721,15 +774,18 @@ def enrich_artists(records: list, user_id: str) -> None:
         status = cache_entry_status(title, ARTIST_CACHE.get(title))
         if status == "retry":
             seen[title] = (r["artist"], r["video_id"])
-        elif status == "stale":
+        elif status in ("stale", "unmatched"):
             stale[title] = (r["artist"], r["video_id"])
 
-    # Wrong matches from the old matcher are re-checked a batch at a time so
-    # a single sync can't blow past the request timeout; the rest heal on
-    # later syncs. Genuinely new titles are never deferred.
+    # Wrong matches and titles YouTube Music never matched are re-checked a
+    # batch at a time so a single sync can't blow past the request timeout;
+    # the rest heal on later syncs. Genuinely new titles are never deferred.
+    # Skipped entirely while YouTube Music is known to be unreachable.
     STALE_PER_SYNC = 40
+    if time.time() < _ytm_state["down_until"]:
+        stale = {}
     if stale:
-        app.logger.info(f"Re-checking {min(len(stale), STALE_PER_SYNC)} of {len(stale)} previously mismatched titles")
+        app.logger.info(f"Re-checking {min(len(stale), STALE_PER_SYNC)} of {len(stale)} titles missing album details")
     uncached = [(t, a, v) for t, (a, v) in seen.items()]
     uncached += [(t, a, v) for t, (a, v) in list(stale.items())[:STALE_PER_SYNC]]
     
