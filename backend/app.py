@@ -49,15 +49,60 @@ LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
 try:
     import psycopg2
+    from psycopg2 import pool as pg_pool
     from psycopg2.extras import execute_values
 except ImportError:
     psycopg2 = None
+    pg_pool = None
     execute_values = None
-from contextlib import contextmanager  
+from contextlib import contextmanager
+import threading
 
-# --- SUPABASE / POSTGRES CLOUD DB SETUP ---
-# Just put your Supabase connection string in the HuggingFace Secrets as DATABASE_URL
+# --- POSTGRES (Neon) ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# The DB and this server are in different regions, so every new connection
+# costs several cross-region round trips (TCP + TLS + auth) - over a second.
+# Reuse connections from a pool instead of opening one per query.
+_db_pool = None
+_db_pool_lock = threading.Lock()
+_conn_last_used = {}
+POOL_IDLE_CHECK = 60  # seconds idle before we ping a pooled connection
+
+def _get_db_pool():
+    global _db_pool
+    if _db_pool is None:
+        with _db_pool_lock:
+            if _db_pool is None:
+                _db_pool = pg_pool.ThreadedConnectionPool(
+                    1, 8, DATABASE_URL,
+                    keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3)
+    return _db_pool
+
+def _checkout_connection(db_pool):
+    """A pooled connection that is still alive. Neon drops idle connections
+    (e.g. when its compute suspends), so ping ones that sat unused a while."""
+    for _ in range(3):
+        conn = db_pool.getconn()
+        if not conn.closed and not conn.autocommit:
+            # Autocommit: one round trip per query instead of three (psycopg2
+            # otherwise sends BEGIN first, and we'd ROLLBACK after). Every
+            # write in this app is a single statement, so nothing relies on
+            # multi-statement transactions; conn.commit() becomes a no-op.
+            conn.autocommit = True
+        idle = time.time() - _conn_last_used.get(id(conn), 0)
+        if not conn.closed and idle < POOL_IDLE_CHECK:
+            return conn
+        try:
+            if conn.closed:
+                raise psycopg2.InterfaceError("connection closed")
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+            return conn
+        except psycopg2.Error:
+            _conn_last_used.pop(id(conn), None)
+            db_pool.putconn(conn, close=True)
+    return db_pool.getconn()
 
 @contextmanager
 def get_db_connection():
@@ -76,11 +121,21 @@ def get_db_connection():
         yield DummyConn()
         return
 
-    conn = psycopg2.connect(DATABASE_URL)
+    db_pool = _get_db_pool()
+    conn = _checkout_connection(db_pool)
+    broken = False
     try:
         yield conn
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        broken = True
+        raise
     finally:
-        conn.close()
+        discard = broken or bool(conn.closed)
+        if discard:
+            _conn_last_used.pop(id(conn), None)
+        else:
+            _conn_last_used[id(conn)] = time.time()
+        db_pool.putconn(conn, close=discard)
 
 # Initialize tables
 def init_db():
@@ -1443,37 +1498,6 @@ def find_profile_by_code(code):
             row = cur.fetchone()
     return {"user_id": row[0], "name": row[1], "photo": row[2], "code": row[3]} if row else None
 
-def are_friends(user_id, friend_id):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM friendships WHERE user_id = %s AND friend_id = %s", (user_id, friend_id))
-            return cur.fetchone() is not None
-
-def get_cached_dashboard_with_time(user_id):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT dashboard_data, last_updated FROM user_cache WHERE username = %s", (user_id,))
-            row = cur.fetchone()
-    if not row or not row[0]:
-        return None, None
-    data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-    return data, row[1]
-
-def period_stats(dashboard, period):
-    """One period's stats for a friend to see - without the full play
-    history or artist deep-dives, which stay private to the owner."""
-    if not dashboard:
-        return None
-    if period == "all":
-        data = dashboard.get("all_time")
-    elif "-" in period:
-        data = (dashboard.get("monthly_stats") or {}).get(period)
-    else:
-        data = (dashboard.get("yearly_stats") or {}).get(period)
-    if not data:
-        return None
-    return {k: v for k, v in data.items() if k not in ("history", "artist_profiles")}
-
 def taste_match(mine, theirs):
     """Blend-style score from overlapping all-time top artists and songs,
     weighted by how much of each person's listening they make up."""
@@ -1561,19 +1585,44 @@ def remove_friend(code):
 @app.route("/api/friends/<code>/compare", methods=["GET"])
 @require_auth
 def compare_with_friend(code):
-    friend = find_profile_by_code(code)
-    if not friend or not are_friends(g.user_id, friend["user_id"]):
+    period = (request.args.get("period") or "all").strip()
+    if period == "all":
+        path = ["all_time"]
+    else:
+        path = ["monthly_stats" if "-" in period else "yearly_stats", period]
+
+    # One round trip that only returns what the battle needs: the friendship
+    # check, this one period's stats (private play history and deep-dives
+    # stripped in the DB), and both top-50 lists for the taste match. This
+    # used to download both users' full multi-MB dashboards per request.
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT p.friend_code, p.display_name, p.photo_url,
+                       (fc.dashboard_data #> %(path)s) - 'history' - 'artist_profiles',
+                       fc.last_updated,
+                       fc.dashboard_data #> '{all_time,top_artists}',
+                       fc.dashboard_data #> '{all_time,top_songs}',
+                       mc.dashboard_data #> '{all_time,top_artists}',
+                       mc.dashboard_data #> '{all_time,top_songs}'
+                FROM profiles p
+                JOIN friendships f ON f.user_id = %(me)s AND f.friend_id = p.user_id
+                LEFT JOIN user_cache fc ON fc.username = p.user_id
+                LEFT JOIN user_cache mc ON mc.username = %(me)s
+                WHERE p.friend_code = %(code)s
+            """, {"path": path, "me": g.user_id, "code": code.strip().upper()})
+            row = cur.fetchone()
+    if not row:
         return jsonify({"error": "You can only compare with people on your friends list"}), 403
 
-    period = (request.args.get("period") or "all").strip()
-    their_dashboard, their_updated = get_cached_dashboard_with_time(friend["user_id"])
-    my_dashboard = get_cached_dashboard(g.user_id)
+    friend_code, name, photo, data, updated, their_artists, their_songs, my_artists, my_songs = row
+    top_lists = lambda artists, songs: {"top_artists": artists, "top_songs": songs} if artists and songs else None
     return jsonify({
-        "friend": {"code": friend["code"], "name": friend["name"], "photo": friend["photo"]},
+        "friend": {"code": friend_code, "name": name, "photo": photo},
         "period": period,
-        "data": period_stats(their_dashboard, period),
-        "last_synced": their_updated.isoformat() if their_updated else None,
-        "blend": taste_match((my_dashboard or {}).get("all_time"), (their_dashboard or {}).get("all_time")),
+        "data": data,
+        "last_synced": updated.isoformat() if updated else None,
+        "blend": taste_match(top_lists(my_artists, my_songs), top_lists(their_artists, their_songs)),
     })
 
 @app.route("/api/shared/<token>", methods=["GET"])

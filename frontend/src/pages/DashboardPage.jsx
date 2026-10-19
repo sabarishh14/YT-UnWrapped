@@ -157,9 +157,20 @@ export default function DashboardPage({ data, onRefresh }) {
   const [opponent, setOpponent] = useState(null)
   const [battleStatus, setBattleStatus] = useState({ loading: false, error: '' })
   const latestRequest = useRef(0)
+  // Friend stats only change when they sync, so keep each friend+period we've
+  // loaded this session - flipping back to a period is then instant.
+  const comparisons = useRef(new Map())
+
+  const getComparison = async (friend, period) => {
+    const key = `${friend.code}|${period}`
+    if (!comparisons.current.has(key)) {
+      comparisons.current.set(key, await loadFriendComparison(friend, period))
+    }
+    return comparisons.current.get(key)
+  }
 
   const pickFriend = async (friend) => {
-    const result = await loadFriendComparison(friend, selectedMonth)  // throws -> shown in the picker
+    const result = await getComparison(friend, selectedMonth)  // throws -> shown in the picker
     setOpponent(friend)
     setFriendData(result)
     setBattleStatus({ loading: false, error: '' })
@@ -179,9 +190,15 @@ export default function DashboardPage({ data, onRefresh }) {
       return
     }
     const request = ++latestRequest.current
+    const cached = comparisons.current.get(`${opponent.code}|${period}`)
+    if (cached) {
+      setFriendData(cached)
+      setBattleStatus({ loading: false, error: '' })
+      return
+    }
     setBattleStatus({ loading: true, error: '' })
     try {
-      const result = await loadFriendComparison(opponent, period)
+      const result = await getComparison(opponent, period)
       if (request !== latestRequest.current) return  // a newer click won
       setFriendData(result)
       setBattleStatus({ loading: false, error: '' })
