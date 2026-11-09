@@ -8,7 +8,7 @@ import requests
 import hashlib
 import uuid # <--- NEW: For generating secure share links
 import secrets
-from collections import defaultdict
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -414,8 +414,10 @@ def fetch_lastfm_scrobbles(username, from_ts=None):
                     "video_id": vid,
                     "artist": artist,
                     "artists": [artist],
-                    # Used when YouTube Music has no album for the song.
-                    "album": (t.get("album") or {}).get("#text") or None,
+                    # The album this play actually came from. Kept apart from
+                    # "album" because song details are saved per title, and the
+                    # same song can be on both a single and a full album.
+                    "scrobbled_album": (t.get("album") or {}).get("#text") or None,
                     "timestamp": ts,
                     "year_month": ts.strftime("%Y-%m"),
                     "date": ts.strftime("%Y-%m-%d"),
@@ -560,6 +562,22 @@ def titles_match(source_title: str, found_title: str) -> bool:
     source = set(_title_words(source_title))
     return sum(w in source for w in found) / len(found) >= 0.6
 
+def _album_core(name) -> str:
+    """Album name without extras like "(Original Motion Picture Soundtrack)"."""
+    core = re.sub(r'\(.*?\)|\[.*?\]', ' ', (name or "").lower())
+    return re.sub(r'[^\w]+', ' ', core).strip()
+
+def same_album(a, b) -> bool:
+    core = _album_core(a)
+    return bool(core) and core == _album_core(b)
+
+def needs_album_recheck(entry, album_hint) -> bool:
+    """Last.fm says this play came from a different album than the version we
+    matched (usually we matched the single), and we haven't looked for it yet."""
+    if not album_hint or not isinstance(entry, dict) or not entry.get("real_video_id"):
+        return False
+    return not same_album(album_hint, entry.get("album")) and album_hint not in entry.get("album_hints", [])
+
 def cache_entry_status(title: str, entry) -> str:
     """'ok' - use as-is; 'stale' - matched by an older, looser matcher and
     fails the current title check; 'unmatched' - YouTube Music never matched
@@ -577,9 +595,45 @@ def cache_entry_status(title: str, entry) -> str:
         return "unmatched"
     return "ok" if entry.get("image") else "retry"
 
+# Songs from one album share these, so each album is only fetched once.
+_albums_by_id = {}
+_album_ids_by_name = {}
+
+def get_album_cached(browse_id):
+    if browse_id not in _albums_by_id:
+        album = yt_call("get_album", browse_id)
+        if album is None:
+            return {}
+        if len(_albums_by_id) >= 200:
+            _albums_by_id.clear()
+        _albums_by_id[browse_id] = album
+    return _albums_by_id[browse_id]
+
+def find_track_on_album(title, album_name):
+    """This song as it appears on the named album, ready for build_match_meta,
+    or None. Searching albums finds album versions that a song search misses,
+    because the single usually ranks above them."""
+    key = album_name.lower()
+    if key not in _album_ids_by_name:
+        results = yt_call("search", album_name, filter="albums", limit=5) or []
+        hit = next((a for a in results[:5] if same_album(album_name, a.get("title"))), None)
+        _album_ids_by_name[key] = hit["browseId"] if hit else None
+    browse_id = _album_ids_by_name[key]
+    if not browse_id:
+        return None
+
+    album = get_album_cached(browse_id)
+    tracks = album.get("tracks") or []
+    words = _title_words(title)
+    track = (next((t for t in tracks if _title_words(t.get("title")) == words), None)
+             or next((t for t in tracks if titles_match(title, t.get("title", ""))), None))
+    if not track or not track.get("videoId"):
+        return None
+    return {**track, "album": {"name": album.get("title"), "id": browse_id}, "thumbnails": album.get("thumbnails")}
+
 def build_match_meta(match: dict, fallback_title: str, channel_artist: str = "") -> dict:
-    """The details saved for a title, from a YouTube Music search result or
-    watch-playlist track."""
+    """The details saved for a title, from a YouTube Music search result,
+    watch-playlist track or album track."""
     artists = [a['name'] for a in match.get('artists') or []]
 
     # --- Extract Music Directors and block junk like "Various Artists" ---
@@ -587,7 +641,7 @@ def build_match_meta(match: dict, fallback_title: str, channel_artist: str = "")
     album_info = match.get('album')
     if album_info and album_info.get('id'):
         try:
-            full_album = yt_call("get_album", album_info['id']) or {}
+            full_album = get_album_cached(album_info['id'])
             album_artists = [a['name'] for a in full_album.get('artists') or []]
 
             existing_lower = [a.lower() for a in artists]
@@ -629,19 +683,22 @@ def build_match_meta(match: dict, fallback_title: str, channel_artist: str = "")
         "music_directors": music_directors, # <-- Save MDs separately!
     }
 
-def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
+def lookup_metadata(title: str, channel_artist: str, video_id: str, album_hint: str = None) -> dict:
     prior_attempts = 0
-    trust_video_id = True
+    # A Last.fm play's stored ID came from our own earlier match, not the play.
+    trust_video_id = not album_hint
     cached = ARTIST_CACHE.get(title) if isinstance(ARTIST_CACHE.get(title), dict) else None
+    album_recheck = False
     if cached:
         status = cache_entry_status(title, cached)
-        if status == "ok":
+        album_recheck = status == "ok" and needs_album_recheck(cached, album_hint)
+        if status == "ok" and not album_recheck:
             return cached
         if status == "stale":
             # The record's stored video_id was taken from this wrong match,
             # so looking it up by ID would just return the wrong song again.
             trust_video_id = False
-        else:
+        elif not album_recheck:
             prior_attempts = cached.get("_enrich_attempts", 0)
 
     clean_title = re.sub(r'(?i)\(.*?lyrical.*?\)|\[.*?official.*?\]|\(.*?audio.*?\]|\(feat\..*?\)', '', title)
@@ -652,8 +709,22 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     ytm_unavailable = False
 
     try:
+        # 0. Last.fm says which album this came from, so look for that version.
+        # Otherwise the first title match wins, which is usually the single.
+        if album_hint:
+            best_match = find_track_on_album(title, album_hint)
+            if not best_match:
+                results = yt_call("search", f"{clean_title} {album_hint}", filter="songs", limit=10) or []
+                best_match = next((r for r in results[:10] if titles_match(title, r.get('title', ''))
+                                   and same_album(album_hint, (r.get('album') or {}).get('name'))), None)
+            if album_recheck and not best_match:
+                # YouTube Music doesn't have that version: keep the current
+                # match, and don't search for this album again.
+                cached["album_hints"] = cached.get("album_hints", []) + [album_hint]
+                return cached
+
         # 1. Try Exact Video ID match first (Only for YouTube Takeout records)
-        if trust_video_id and video_id and not str(video_id).startswith("lfm_"):
+        if not best_match and trust_video_id and video_id and not str(video_id).startswith("lfm_"):
             watch_playlist = yt_call("get_watch_playlist", videoId=video_id)
             tracks = (watch_playlist or {}).get("tracks", [])
             if tracks:
@@ -718,6 +789,8 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             meta["_enrich_attempts"] = prior_attempts
     elif not best_match or not meta.get("image"):
         meta["_enrich_attempts"] = prior_attempts + 1
+    if album_hint and not ytm_unavailable:
+        meta["album_hints"] = (cached or {}).get("album_hints", []) + [album_hint]
     meta["match_v"] = MATCH_VERSION
 
     # Save to Database and Return
@@ -801,16 +874,22 @@ def load_track_overrides(user_id):
 def enrich_artists(records: list, user_id: str) -> None:
     overrides = load_track_overrides(user_id)
     seen, stale = {}, {}
+    considered = set(overrides)
     # Newest first, so the plays you actually see at the top get fixed first.
+    # Each title is only judged on its newest play: details are saved per
+    # title, so if it was played from two albums the latest one sets the cover.
     for r in sorted(records, key=lambda x: x["timestamp"], reverse=True):
         title = r["title"]
-        if title in seen or title in stale or title in overrides:
+        if title in considered:
             continue
-        status = cache_entry_status(title, ARTIST_CACHE.get(title))
+        considered.add(title)
+        entry = ARTIST_CACHE.get(title)
+        album_hint = r.get("scrobbled_album")
+        status = cache_entry_status(title, entry)
         if status == "retry":
-            seen[title] = (r["artist"], r["video_id"])
-        elif status in ("stale", "unmatched"):
-            stale[title] = (r["artist"], r["video_id"])
+            seen[title] = (r["artist"], r["video_id"], album_hint)
+        elif status in ("stale", "unmatched") or needs_album_recheck(entry, album_hint):
+            stale[title] = (r["artist"], r["video_id"], album_hint)
 
     # Wrong matches and titles YouTube Music never matched are re-checked a
     # batch at a time so a single sync can't blow past the request timeout;
@@ -821,8 +900,8 @@ def enrich_artists(records: list, user_id: str) -> None:
         stale = {}
     if stale:
         app.logger.info(f"Re-checking {min(len(stale), STALE_PER_SYNC)} of {len(stale)} titles missing album details")
-    uncached = [(t, a, v) for t, (a, v) in seen.items()]
-    uncached += [(t, a, v) for t, (a, v) in list(stale.items())[:STALE_PER_SYNC]]
+    uncached = [(t, *details) for t, details in seen.items()]
+    uncached += [(t, *details) for t, details in list(stale.items())[:STALE_PER_SYNC]]
     
     total = len(uncached)
     # Say what's actually happening: a sync with no new songs can still spend
@@ -835,7 +914,7 @@ def enrich_artists(records: list, user_id: str) -> None:
 
     # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM / proxied requests)
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
+        futures = [executor.submit(lookup_metadata, *details) for details in uncached]
         for i, future in enumerate(as_completed(futures)):
             set_progress(user_id, lookup_label, i + 1, total)
 
@@ -854,8 +933,9 @@ def enrich_artists(records: list, user_id: str) -> None:
         r["artist"]     = r["artists"][0]
         r["saavn_name"] = meta.get("saavn_name")
         r["corrected"]  = bool(override)
-        # A record's stored album may be from the wrong match this corrects.
-        r["album"]      = meta.get("album") if override else (meta.get("album") or r.get("album"))
+        # The user's correction wins, then the album this play really came
+        # from, then whichever version of the song we matched for this title.
+        r["album"]      = meta.get("album") if override else (r.get("scrobbled_album") or meta.get("album") or r.get("album"))
         
         # --- 2. EVERYTHING ELSE: Trust YouTube Music FIRST for higher quality data ---
         r["music_directors"] = meta.get("music_directors", [])
@@ -1042,18 +1122,18 @@ def compute_streak(records):
             "start": best_s.strftime("%b %d"), "end": best_e.strftime("%b %d")}
 
 def compute_top_albums_by_plays(records, durations):
-    album_plays = defaultdict(int)
-    album_meta = {}
+    # Grouped by album alone: soundtrack songs often lead with different
+    # artists, and grouping by artist too split one album across many rows.
+    album_plays = Counter()
+    album_artists = defaultdict(Counter)
     for r in records:
         dur = durations.get(r["video_id"], DEFAULT_TRACK_DURATION)
         if dur >= MIN_PLAY_SECONDS and r.get("album"):
-            key = f"{r['album']}_{r['artist']}"
-            album_plays[key] += 1
-            album_meta[key] = {"name": r["album"], "artist": r["artist"]}
-            
-    sorted_a = sorted(album_plays.items(), key=lambda x: x[1], reverse=True)
-    return [{"name": album_meta[k]["name"], "artist": album_meta[k]["artist"], "plays": p}
-            for k, p in sorted_a[:10]]
+            album_plays[r["album"]] += 1
+            album_artists[r["album"]][r["artist"]] += 1
+
+    return [{"name": album, "artist": album_artists[album].most_common(1)[0][0], "plays": plays}
+            for album, plays in album_plays.most_common(10)]
 
 def compute_throwback(all_months, target_month):
     try:
@@ -1387,7 +1467,7 @@ def require_auth(view):
 
 # ── Routes ───────────────────────────────────────────────
 
-API_VERSION = "1.2.0 (Friends & All-Time Update)"
+API_VERSION = "1.3.0 (Search, Song Fixes & Album Credit)"
 
 @app.route("/", methods=["GET"])
 def index():
