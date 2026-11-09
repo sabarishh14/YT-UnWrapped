@@ -38,7 +38,7 @@ CORS(app, resources={
             "http://localhost:5173",
             "https://yt-un-wrapped.vercel.app" # Make sure there is NO trailing slash here!
         ],
-        "methods": ["GET", "POST", "OPTIONS"],
+        "methods": ["GET", "POST", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"]
     }
 })
@@ -790,21 +790,24 @@ def enrich_artists(records: list, user_id: str) -> None:
     uncached += [(t, a, v) for t, (a, v) in list(stale.items())[:STALE_PER_SYNC]]
     
     total = len(uncached)
+    # Say what's actually happening: a sync with no new songs can still spend
+    # time re-checking older ones.
+    lookup_label = "Looking up your new songs..." if seen else "Filling in missing song details..."
     if total:
-        set_progress(user_id, "Finding album art & details...", 0, total)
+        set_progress(user_id, lookup_label, 0, total)
 
-    app.logger.info(f"Enriching {total} new titles for {user_id}...")
+    app.logger.info(f"Looking up {len(seen)} new and {total - len(seen)} older titles for {user_id}...")
 
     # SCALED DOWN PARALLEL FETCHING (Optimized for 1GB RAM / proxied requests)
     with ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(lookup_metadata, title, channel_artist, vid) for title, channel_artist, vid in uncached]
         for i, future in enumerate(as_completed(futures)):
-            set_progress(user_id, "Finding album art & details...", i + 1, total)
+            set_progress(user_id, lookup_label, i + 1, total)
 
     if uncached:
         save_cache()
 
-    set_progress(user_id, "Wrapping things up...")
+    set_progress(user_id, "Saving your plays...")
 
     for r in records:
         meta = ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})

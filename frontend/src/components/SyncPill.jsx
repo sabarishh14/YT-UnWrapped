@@ -1,12 +1,13 @@
-// Small non-blocking status pill for background syncs: live progress while a
-// sync runs, then the result for a few seconds.
-export default function SyncPill({ syncing, progressMsg, result }) {
-  if (!syncing && !result) return null
+// Small non-blocking status pill: the server waking up, then live progress
+// while a sync runs, then the result for a few seconds.
+export default function SyncPill({ waking, syncing, progressMsg, result }) {
+  if (!waking && !syncing && !result) return null
 
   const [message, count] = (progressMsg || '').split('\n')
-  const text = syncing ? (message || 'Syncing…') : result
-  const failed = !syncing && result.startsWith('Sync failed')
-  const accent = failed ? '#ffb347' : syncing ? '#ff3333' : '#4ade80'
+  const busy = waking || syncing
+  const text = waking ? 'Waking up the server · about a minute' : syncing ? (message || 'Syncing…') : result
+  const failed = !busy && result.startsWith('Sync failed')
+  const accent = waking || failed ? '#ffb347' : syncing ? '#ff3333' : '#4ade80'
 
   return (
     <div
@@ -42,11 +43,11 @@ export default function SyncPill({ syncing, progressMsg, result }) {
           flexShrink: 0,
           background: accent,
           boxShadow: `0 0 10px ${accent}`,
-          animation: syncing ? 'syncPillPulse 1s ease-in-out infinite alternate' : 'none',
+          animation: busy ? 'syncPillPulse 1s ease-in-out infinite alternate' : 'none',
         }}
       />
       <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{text}</span>
-      {syncing && count && (
+      {!waking && syncing && count && (
         <span style={{ color: '#aaa', fontFamily: 'monospace', flexShrink: 0 }}>
           {count.replace(/[()]/g, '')}
         </span>

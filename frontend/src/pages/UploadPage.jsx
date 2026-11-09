@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback } from 'react'
 import styles from './UploadPage.module.css'
 
-import { apiFetch } from '../api.js'
+import { apiFetch, wakeServer } from '../api.js'
 
-export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastFm }) {
+export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastFm, serverWaking }) {
   const [dragOver, setDragOver] = useState(false)
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -41,20 +41,27 @@ export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastF
           setLoadingMsg(`${data.message}\n(${data.processed} / ${data.total} tracks)\n${etaStr}`)
         } else if (data.total > 0) {
           setLoadingMsg(`${data.message}\n(0 / ${data.total} tracks)\nCalculating time...`)
-        } else {
+        } else if (data.message && data.message !== 'Idle') {
           setLoadingMsg(data.message)
         }
       } catch (err) {}
     }, 1000)
   }
 
+  // Polling only starts once the server is awake, so it has progress to report.
+  const startPollingWhenAwake = async () => {
+    if (!(await wakeServer())) throw new Error("Can't reach the server right now. Give it a minute and try again.")
+    return startProgressPolling()
+  }
+
   const handleSync = async () => {
     setError('')
     setSyncing(true)
     setLoadingMsg('Starting sync...')
-    const pollId = startProgressPolling()
+    let pollId
 
     try {
+      pollId = await startPollingWhenAwake()
       const response = await apiFetch('/api/analyze', {
         method: 'POST',
         body: JSON.stringify({ entries: [], lastfm_username: lastFmUser, tz: Intl.DateTimeFormat().resolvedOptions().timeZone }),
@@ -79,6 +86,7 @@ export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastF
     setError('')
     setLoading(true)
     setLoadingMsg('Reading your history file…')
+    let pollId
 
     try {
       const text = await file.text()
@@ -88,7 +96,7 @@ export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastF
       if (entries.length === 0) throw new Error('No YouTube Music watch history found in this file.')
 
       setLoadingMsg('Starting analysis...')
-      const pollId = startProgressPolling()
+      pollId = await startPollingWhenAwake()
 
       const response = await apiFetch('/api/analyze', {
         method: 'POST',
@@ -115,7 +123,7 @@ export default function UploadPage({ onAnalysisComplete, lastFmUser, onSaveLastF
 
   // ── CINEMATIC LOADING OVERLAY ──
   if (loading || syncing) {
-    const msgParts = loadingMsg.split('\n')
+    const msgParts = serverWaking ? ['Waking up the server'] : loadingMsg.split('\n')
     const mainText = msgParts[0] || 'Unwrapping...'
     const progressText = msgParts[1] || ''
     const etaText = msgParts[2] || ''

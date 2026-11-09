@@ -7,7 +7,7 @@ import { auth, loginWithGoogle, logout } from './firebase.js'
 import { onAuthStateChanged } from 'firebase/auth'
 import SharedPage from './pages/SharedPage.jsx' // <--- Add this!
 
-import { apiFetch } from './api.js'
+import { apiFetch, subscribeServerStatus, wakeServer } from './api.js'
 
 export default function App() {
   const [analysisData, setAnalysisData] = useState(null)
@@ -24,12 +24,15 @@ export default function App() {
   // overlapping during a slow cold start) - a ref because it needs to be
   // read synchronously inside fetchCloudData, not just trigger a re-render.
   const syncInFlight = useRef(false)
+  const [serverStatus, setServerStatus] = useState('unknown')
 
-  // Render's free tier can take 30-60s to cold-start after being idle.
-  // Without this, the loading screen just sits on "Starting up..." and
-  // looks frozen/broken, which is what prompts people to keep clicking
-  // Refresh (which is what caused the concurrent-sync crash).
-  const [showColdStartHint, setShowColdStartHint] = useState(false)
+  // Start waking the server as soon as the page opens, even on the login
+  // screen, so it's already up by the time someone has signed in.
+  useEffect(() => {
+    const unsubscribe = subscribeServerStatus(setServerStatus)
+    wakeServer()
+    return unsubscribe
+  }, [])
 
   // ── THE MISSING HASH STATE (Make sure this is here!) ──
   const [hash, setHash] = useState(window.location.hash);
@@ -41,20 +44,13 @@ export default function App() {
   }, []);
   // ──────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (isInitializing || isFetchingCloud) {
-      const t = setTimeout(() => setShowColdStartHint(true), 6000);
-      return () => clearTimeout(t);
-    }
-    setShowColdStartHint(false);
-  }, [isInitializing, isFetchingCloud]);
-
   // --- NEW: Global Progress Polling Effect ---
   // Polls for every sync (not just the full-screen one), so background
-  // syncs show live progress in the SyncPill too.
+  // syncs show live progress in the SyncPill too. Waits until the server is
+  // awake, since it has no progress to report before then.
   useEffect(() => {
     let pollId;
-    if (isSyncing && user) {
+    if (isSyncing && user && serverStatus === 'ready') {
       const startTime = Date.now();
       pollId = setInterval(async () => {
         try {
@@ -86,7 +82,7 @@ export default function App() {
       setProgressMsg('');
     }
     return () => clearInterval(pollId);
-  }, [isSyncing, user]);
+  }, [isSyncing, user, serverStatus]);
 
   const syncResultTimer = useRef(null)
   const showSyncResult = (text) => {
@@ -172,11 +168,20 @@ export default function App() {
     const storedLastFm = localStorage.getItem('yt_lastfm')
     if (storedLastFm !== null) setLastFmUser(storedLastFm)
 
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       
       if (currentUser) {
         setIsFetchingCloud(true); // Show loading briefly while checking cache
+
+        const awake = await wakeServer();
+        if (!awake) {
+          // Don't fall through to the upload screen, which would look like
+          // this account has no data. The "can't reach server" screen shows.
+          setIsFetchingCloud(false);
+          setIsInitializing(false);
+          return;
+        }
 
         // The Last.fm username is saved per account on the server, so it
         // follows you across browsers/devices. Pull it down to keep the UI
@@ -198,12 +203,16 @@ export default function App() {
           .then(res => res.ok ? res.json() : Promise.reject('No cache'))
           .then(data => {
             if (!data.error && data.months_available) {
+              // Saved stats are ready, so show them now and let the sync run
+              // behind them. These update together so the upload screen can't
+              // flash up between the loader leaving and the dashboard arriving.
               startTransition(() => {
                 setAnalysisData(data);
                 setFileName(`Offline Cache (Syncing new tracks...)`);
+                setIsFetchingCloud(false);
+                setIsInitializing(false);
               });
-              setIsFetchingCloud(false); // Drop the loading screen instantly
-              
+
               // 2. Silently sync Last.fm in the background!
               fetchCloudData(storedLastFm, true);
             } else {
@@ -264,12 +273,15 @@ export default function App() {
   // ── HIJACK RENDER: IF IT'S A SHARED LINK, BYPASS EVERYTHING! ──
   if (hash.startsWith('#/share/')) {
     const token = hash.replace('#/share/', '').split('?')[0];
-    return <SharedPage token={token} />;
+    return <SharedPage token={token} waking={serverStatus === 'waking'} />;
   }
-  
+
   if (isInitializing || isFetchingCloud) {
-    const msgParts = progressMsg.split('\n');
-    const mainText = msgParts[0] || (isFetchingCloud ? "Syncing your history..." : "Starting up...");
+    const waking = serverStatus === 'waking';
+    const msgParts = waking ? [] : progressMsg.split('\n');
+    const mainText = waking
+      ? "Waking up the server"
+      : msgParts[0] || (isFetchingCloud && serverStatus === 'ready' ? "Loading your stats..." : "Starting up...");
     const progressText = msgParts[1] || '';
     const etaText = msgParts[2] || '';
 
@@ -295,9 +307,9 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {progressText && <p style={{ fontFamily: 'monospace', fontSize: '16px', color: '#aaa', letterSpacing: '1.5px' }}>{progressText}</p>}
             {etaText && <p style={{ fontSize: '20px', fontWeight: 600, color: '#ff3333', letterSpacing: '-0.5px', textShadow: '0 0 20px rgba(255, 0, 0, 0.4)' }}>{etaText}</p>}
-            {showColdStartHint && (
-              <p style={{ fontSize: '14px', color: '#888', maxWidth: '320px', lineHeight: '1.5' }}>
-                Our free-tier server takes a moment to wake up after being idle — this can take up to a minute. Still working, hang tight.
+            {waking && (
+              <p style={{ fontSize: '15px', color: '#aaa', maxWidth: '340px', lineHeight: '1.5', padding: '0 16px' }}>
+                The free server sleeps when no one's using it. It usually wakes within a minute.
               </p>
             )}
           </div>
@@ -432,6 +444,23 @@ export default function App() {
     )
   }
 
+  if (serverStatus === 'down' && !analysisData) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px', padding: '24px', textAlign: 'center' }}>
+        <h2 style={{ fontSize: 'clamp(26px, 5vw, 36px)', fontWeight: 800, letterSpacing: '-1px', color: 'white' }}>Can't reach the server</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '15px', maxWidth: '340px', lineHeight: '1.5' }}>
+          Your data is safe. The server didn't respond in time, so give it a minute and try again.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ marginTop: '8px', padding: '12px 28px', borderRadius: '100px', border: 'none', background: 'var(--yt-red)', color: 'white', fontSize: '15px', fontWeight: 700, cursor: 'pointer' }}
+        >
+          Try again
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       
@@ -449,7 +478,8 @@ export default function App() {
         {!analysisData
           ? <UploadPage 
               onAnalysisComplete={handleAnalysisComplete}
-              lastFmUser={lastFmUser} 
+              serverWaking={serverStatus === 'waking'}
+              lastFmUser={lastFmUser}
               onSaveLastFm={handleSaveLastFm} 
             />
           : <DashboardPage 
@@ -459,7 +489,7 @@ export default function App() {
         }
       </main>
 
-      <SyncPill syncing={isSyncing} progressMsg={progressMsg} result={syncResult} />
+      <SyncPill waking={serverStatus === 'waking'} syncing={isSyncing} progressMsg={progressMsg} result={syncResult} />
 
     </div>
   )

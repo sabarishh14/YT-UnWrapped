@@ -4,7 +4,7 @@ import MonthCapsule from '../components/MonthCapsule.jsx'
 import YearWrappedCapsule from '../components/YearWrappedCapsule.jsx'
 import AllTimeCapsule from '../components/AllTimeCapsule.jsx'
 import CompareView from '../components/CompareView.jsx'
-import { apiFetch, API_BASE } from '../api.js'
+import { apiFetch } from '../api.js'
 
 const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const FULL_MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
@@ -62,7 +62,7 @@ function CompareAction({ onPickFriend, onResult }) {
     setBusy('link')
     setError('')
     try {
-      const d = await (await fetch(`${API_BASE}/api/shared/${t}`)).json()
+      const d = await (await apiFetch(`/api/shared/${t}`)).json()
       if (d.error) throw new Error(d.error)
       onResult({ stats: d.dashboard_data, name: d.dashboard_data.shared_by || 'Friend' })
     } catch (e) {

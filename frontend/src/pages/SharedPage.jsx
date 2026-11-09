@@ -1,14 +1,13 @@
 import { useState, useEffect } from 'react';
 import MonthCapsule from '../components/MonthCapsule.jsx';
+import { apiFetch } from '../api.js';
 
-const API_BASE = import.meta.env.VITE_API_URL || "";
-
-export default function SharedPage({ token }) {
+export default function SharedPage({ token, waking }) {
   const [sharedData, setSharedData] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/shared/${token}`)
+    apiFetch(`/api/shared/${token}`)
       .then(res => res.json())
       .then(data => {
         if (data.error) setError(data.error);
@@ -29,7 +28,7 @@ export default function SharedPage({ token }) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#888', background: '#050505', gap: '16px' }}>
         <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,0,0,0.2)', borderTopColor: '#FF0000', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
-        <p>Loading Unwrapped magic...</p>
+        <p>{waking ? 'Waking up the server. It usually takes under a minute...' : 'Loading Unwrapped magic...'}</p>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
