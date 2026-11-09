@@ -24,6 +24,7 @@ export default function App() {
   // overlapping during a slow cold start) - a ref because it needs to be
   // read synchronously inside fetchCloudData, not just trigger a re-render.
   const syncInFlight = useRef(false)
+  const syncAgain = useRef(false)
   const [serverStatus, setServerStatus] = useState('unknown')
 
   // Start waking the server as soon as the page opens, even on the login
@@ -104,6 +105,9 @@ export default function App() {
       // A sync is already running (background or manual) - don't fire a
       // second overlapping /api/analyze. The backend also guards against
       // this now, but avoiding it here means no wasted request either.
+      // Run once more afterwards, though: the caller just changed something
+      // (fixed or hid a song) that the running sync started too early to see.
+      syncAgain.current = true;
       return;
     }
     syncInFlight.current = true;
@@ -161,6 +165,10 @@ export default function App() {
         if (!silent) setIsFetchingCloud(false);
         syncInFlight.current = false;
         setIsSyncing(false);
+        if (syncAgain.current) {
+          syncAgain.current = false;
+          fetchCloudData(lfm, true);
+        }
       })
   }
 

@@ -232,6 +232,24 @@
   min-width: 0;
 }
 
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fixedTag {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  color: #4ade80;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .title {
   font-size: 13px;
   font-weight: 500;
@@ -273,6 +291,16 @@
 .row:hover .actions,
 .row:focus-within .actions {
   opacity: 1;
+}
+
+/* The buttons sit over the date column. */
+.played {
+  transition: opacity 0.2s ease;
+}
+
+.row:hover .played,
+.row:focus-within .played {
+  opacity: 0;
 }
 
 .actionBtn {
@@ -327,7 +355,7 @@
   .row {
     grid-template-columns: 26px minmax(0, 1fr);
     gap: 10px;
-    padding: 12px 52px 12px 14px;
+    padding: 12px 76px 12px 14px;
   }
 
   .row > .meta,
@@ -341,6 +369,7 @@
 
   .actions {
     right: 8px;
+    gap: 2px;
     opacity: 0.7;
   }
 

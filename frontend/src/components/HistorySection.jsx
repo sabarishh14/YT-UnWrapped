@@ -1,6 +1,7 @@
 import { useState, useMemo, useDeferredValue } from 'react'
 import { auth } from '../firebase.js'
 import { apiFetch } from '../api.js'
+import FixSongModal from './FixSongModal.jsx'
 import styles from './HistorySection.module.css'
 
 const FIELDS = [
@@ -41,6 +42,9 @@ function formatDuration(seconds) {
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 
+// The title as actually played, which is what a correction is saved against.
+const sourceTitleOf = item => item.source_title || item.title
+
 // Plays Last.fm reported that YouTube Music never matched have no real video.
 function songLink(item) {
   if (String(item.video_id).startsWith('lfm_')) {
@@ -57,6 +61,9 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
   const [query, setQuery] = useState('')
   const [field, setField] = useState('all')
   const [searchAllTime, setSearchAllTime] = useState(false)
+  const [fixing, setFixing] = useState(null)
+  // Corrections show straight away, while the stats recalculate in the background.
+  const [localFixes, setLocalFixes] = useState({})
 
   // Keeps typing smooth while thousands of rows are filtered.
   const deferredQuery = useDeferredValue(query)
@@ -66,9 +73,13 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
   const source = searching && searchAllTime && canWiden ? allHistory : history
 
   const visibleRows = useMemo(() => {
-    const active = (source || []).filter(item => !hiddenIds.has(item.video_id))
+    const withFixes = (source || []).map(item => {
+      const key = sourceTitleOf(item)
+      return localFixes[key] ? { ...item, ...localFixes[key], source_title: key } : item
+    })
+    const active = withFixes.filter(item => !hiddenIds.has(item.video_id))
     return searching ? active.filter(item => matches(item, terms, field)) : active
-  }, [source, hiddenIds, searching, terms, field])
+  }, [source, localFixes, hiddenIds, searching, terms, field])
 
   const summary = useMemo(() => {
     if (!searching) return null
@@ -98,6 +109,28 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
     } catch (err) {
       console.error('Failed to hide track:', err)
     }
+  }
+
+  const openFix = (e, item) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setFixing(item)
+  }
+
+  const handleFixed = (fix) => {
+    setLocalFixes(prev => ({ ...prev, [sourceTitleOf(fixing)]: fix }))
+    setFixing(null)
+    if (onRefresh) onRefresh()
+  }
+
+  const handleFixReset = () => {
+    setLocalFixes(prev => {
+      const next = { ...prev }
+      delete next[sourceTitleOf(fixing)]
+      return next
+    })
+    setFixing(null)
+    if (onRefresh) onRefresh()
   }
 
   return (
@@ -193,7 +226,10 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
                       <div className={styles.imageFallback}>🎵</div>
                     )}
                     <div className={styles.songText}>
-                      <span className={styles.title} title={item.title}>{item.title}</span>
+                      <span className={styles.titleRow}>
+                        <span className={styles.title} title={item.title}>{item.title}</span>
+                        {item.corrected && <span className={styles.fixedTag} title="You picked this song">Fixed</span>}
+                      </span>
                       {/* Artist, album and date have their own columns except on phones */}
                       <span className={styles.compactMeta}>{item.artist}</span>
                       <span className={styles.compactMeta}>{[playedAt, item.album].filter(Boolean).join(' · ')}</span>
@@ -204,6 +240,17 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
                   <span className={styles.played}>{playedAt}</span>
 
                   <div className={styles.actions}>
+                    <button
+                      className={styles.actionBtn}
+                      onClick={(e) => openFix(e, item)}
+                      title="Wrong song? Fix it"
+                      aria-label={`Fix wrong song: ${item.title}`}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                    </button>
                     <button
                       className={styles.actionBtn}
                       onClick={(e) => handleHideTrack(e, item.video_id)}
@@ -227,6 +274,17 @@ export default function HistorySection({ history, allHistory, periodLabel, onRef
         <button className={styles.showMore} onClick={() => setExpanded(e => !e)}>
           {expanded ? 'Show less' : `Show all ${visibleRows.length.toLocaleString()} plays`}
         </button>
+      )}
+
+      {fixing && (
+        <FixSongModal
+          item={fixing}
+          sourceTitle={sourceTitleOf(fixing)}
+          playCount={(allHistory || history).filter(h => sourceTitleOf(h) === sourceTitleOf(fixing)).length}
+          onClose={() => setFixing(null)}
+          onFixed={handleFixed}
+          onReset={handleFixReset}
+        />
       )}
     </div>
   )

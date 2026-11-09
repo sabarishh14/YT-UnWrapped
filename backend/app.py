@@ -213,6 +213,16 @@ def init_db():
                     PRIMARY KEY (user_id, friend_id)
                 );
             """)
+            # Songs a user has corrected by hand. Per user, because artist_cache
+            # is shared and one person's fix mustn't change anyone else's stats.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS track_overrides (
+                    username TEXT,
+                    title TEXT,
+                    meta JSONB,
+                    PRIMARY KEY (username, title)
+                );
+            """)
         conn.commit()
 
 app.logger.info(f"Proxy configured for YT Music: {bool(PROXY_URL)}")
@@ -263,11 +273,18 @@ try:
 except ImportError:
     YTMusicServerError = ()
 
-# Network-level failures (as opposed to "no result for this song"). YouTube
-# answering 4xx/5xx (e.g. rate limiting) counts too.
-YTM_ROUTE_ERRORS = (requests.exceptions.RequestException,) + (
-    (YTMusicServerError,) if YTMusicServerError else ())
 YTM_BACKOFF = 300  # seconds to stop using a failed route
+
+def _is_route_failure(e):
+    """Is YouTube Music unreachable, rather than just having no answer for
+    this one request? ytmusicapi raises YTMusicServerError for both, including
+    for a deleted video, which must not pause lookups for every other song."""
+    if isinstance(e, requests.exceptions.RequestException):
+        return True
+    if isinstance(e, YTMusicServerError):
+        status = re.search(r"HTTP (\d{3})", str(e))
+        return bool(status) and (int(status.group(1)) >= 500 or int(status.group(1)) in (403, 429))
+    return False
 
 class YTMusicUnavailable(Exception):
     """Every route to YouTube Music failed - not the same as a song not
@@ -295,7 +312,10 @@ def yt_call(method, *args, **kwargs):
     for i, (label, client) in enumerate(routes):
         try:
             return getattr(client, method)(*args, **kwargs)
-        except YTM_ROUTE_ERRORS as e:
+        except Exception as e:
+            if not _is_route_failure(e):
+                app.logger.warning(f"[YTMusic] {method} raised: {type(e).__name__}: {e}")
+                return None
             last_err = e
             if label == "proxy":
                 _ytm_state["proxy_down_until"] = time.time() + YTM_BACKOFF
@@ -303,9 +323,6 @@ def yt_call(method, *args, **kwargs):
                                    f"going direct for {YTM_BACKOFF}s")
             elif i < len(routes) - 1:
                 time.sleep(0.4)
-        except Exception as e:
-            app.logger.warning(f"[YTMusic] {method} raised: {type(e).__name__}: {e}")
-            return None
     _ytm_state["down_until"] = time.time() + YTM_BACKOFF
     app.logger.warning(f"[YTMusic] unreachable ({type(last_err).__name__}: {last_err}) - "
                        f"pausing lookups for {YTM_BACKOFF}s")
@@ -560,6 +577,58 @@ def cache_entry_status(title: str, entry) -> str:
         return "unmatched"
     return "ok" if entry.get("image") else "retry"
 
+def build_match_meta(match: dict, fallback_title: str, channel_artist: str = "") -> dict:
+    """The details saved for a title, from a YouTube Music search result or
+    watch-playlist track."""
+    artists = [a['name'] for a in match.get('artists') or []]
+
+    # --- Extract Music Directors and block junk like "Various Artists" ---
+    music_directors = []
+    album_info = match.get('album')
+    if album_info and album_info.get('id'):
+        try:
+            full_album = yt_call("get_album", album_info['id']) or {}
+            album_artists = [a['name'] for a in full_album.get('artists') or []]
+
+            existing_lower = [a.lower() for a in artists]
+            for aa in album_artists:
+                if not is_junk(aa): # Blocks "Various Artists", "Release", etc.
+                    music_directors.append(aa)
+                    if aa.lower() not in existing_lower:
+                        artists.append(aa)
+        except Exception as e:
+            app.logger.warning(f"Could not fetch album info for '{fallback_title}': {e}")
+
+    # Fallback: if no album info, assume the channel artist is the director (if valid)
+    if not music_directors and channel_artist and not is_junk(channel_artist):
+        music_directors.append(channel_artist)
+
+    # FIX: Only use Takeout string if YT Music found zero artists
+    if not artists and channel_artist and not is_junk(channel_artist):
+        artists.append(channel_artist)
+
+    # Search results call this 'thumbnails', watch-playlist tracks 'thumbnail'.
+    images = match.get('thumbnails') or match.get('thumbnail') or []
+    image_url = images[-1]['url'] if images else None
+    if image_url:
+        # Upgrade thumbnail resolution from 120x120 to 1080x1080
+        image_url = re.sub(r'=w\d+-h\d+.*', '=w1080-h1080', image_url)
+
+    duration = match.get('duration_seconds')
+    if duration is None and match.get('length'):
+        parts = match['length'].split(':')
+        duration = sum(int(x) * 60 ** i for i, x in enumerate(reversed(parts)))
+
+    return {
+        "artist": ", ".join(artists) if artists else "Unknown Artist",
+        "saavn_name": match.get('title', fallback_title),
+        "album": album_info.get('name') if album_info else None,
+        "duration": duration,
+        "image": image_url,
+        "real_video_id": match.get('videoId'),
+        "music_directors": music_directors, # <-- Save MDs separately!
+    }
+
 def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
     prior_attempts = 0
     trust_video_id = True
@@ -619,55 +688,7 @@ def lookup_metadata(title: str, channel_artist: str, video_id: str) -> dict:
             return cached
 
     if best_match:
-        artists = [a['name'] for a in best_match.get('artists', [])]
-
-        # --- Extract Music Directors and block junk like "Various Artists" ---
-        music_directors = []
-        album_info = best_match.get('album')
-        if album_info and album_info.get('id'):
-            try:
-                full_album = yt_call("get_album", album_info['id']) or {}
-                album_artists = [a['name'] for a in full_album.get('artists', [])]
-                
-                existing_lower = [a.lower() for a in artists]
-                for aa in album_artists:
-                    if not is_junk(aa): # Blocks "Various Artists", "Release", etc.
-                        music_directors.append(aa)
-                        if aa.lower() not in existing_lower:
-                            artists.append(aa)
-            except Exception as e:
-                app.logger.warning(f"Could not fetch album info for '{clean_title}': {e}")
-        
-        # Fallback: if no album info, assume the channel artist is the director (if valid)
-        if not music_directors and channel_artist and not is_junk(channel_artist):
-            music_directors.append(channel_artist)
-
-        # FIX: Only use Takeout string if YT Music found zero artists
-        if not artists and channel_artist and not is_junk(channel_artist):
-            artists.append(channel_artist)
-                
-        artist_str = ", ".join(artists) if artists else "Unknown Artist"
-        
-        images = best_match.get('thumbnails', [])
-        image_url = images[-1]['url'] if images else None
-        if image_url:
-            # Upgrade thumbnail resolution from 120x120 to 1080x1080
-            image_url = re.sub(r'=w\d+-h\d+.*', '=w1080-h1080', image_url)
-        
-        duration = best_match.get('duration_seconds')
-        if duration is None and best_match.get('length'):
-            parts = best_match['length'].split(':')
-            duration = sum(int(x) * 60 ** i for i, x in enumerate(reversed(parts)))
-        
-        meta = {
-            "artist": artist_str,
-            "saavn_name": best_match.get('title', clean_title),
-            "album": album_info.get('name') if album_info else None,
-            "duration": duration,
-            "image": image_url,
-            "real_video_id": best_match.get('videoId'),
-            "music_directors": music_directors # <-- Save MDs separately!
-        }
+        meta = build_match_meta(best_match, clean_title, channel_artist)
 
     # If YT Music search found nothing, try Last.fm as metadata source
     if not meta:
@@ -764,12 +785,26 @@ def lookup_metadata_lastfm(title: str, channel_artist: str) -> dict:
             
     return None
 
+def load_track_overrides(user_id):
+    """{title: meta} for songs this user has corrected by hand."""
+    if not user_id or not DATABASE_URL:
+        return {}
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT title, meta FROM track_overrides WHERE username = %s", (user_id,))
+                return {t: m if isinstance(m, dict) else json.loads(m) for t, m in cur.fetchall()}
+    except Exception as e:
+        app.logger.error(f"Could not load song corrections: {e}")
+        return {}
+
 def enrich_artists(records: list, user_id: str) -> None:
+    overrides = load_track_overrides(user_id)
     seen, stale = {}, {}
     # Newest first, so the plays you actually see at the top get fixed first.
     for r in sorted(records, key=lambda x: x["timestamp"], reverse=True):
         title = r["title"]
-        if title in seen or title in stale:
+        if title in seen or title in stale or title in overrides:
             continue
         status = cache_entry_status(title, ARTIST_CACHE.get(title))
         if status == "retry":
@@ -810,15 +845,17 @@ def enrich_artists(records: list, user_id: str) -> None:
     set_progress(user_id, "Saving your plays...")
 
     for r in records:
-        meta = ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})
-        if isinstance(meta, str): 
+        override = overrides.get(r["title"])
+        meta = override or ARTIST_CACHE.get(r["title"], {"artist": r["artist"]})
+        if isinstance(meta, str):
             meta = {"artist": meta}
-            
+
         r["artists"]    = split_artists(meta.get("artist", r["artist"]))
         r["artist"]     = r["artists"][0]
         r["saavn_name"] = meta.get("saavn_name")
-        # --- 1. ALBUM: Trust Last.fm FIRST to fix the "Single vs Album" issue ---
-        r["album"]      = meta.get("album") or r.get("album")
+        r["corrected"]  = bool(override)
+        # A record's stored album may be from the wrong match this corrects.
+        r["album"]      = meta.get("album") if override else (meta.get("album") or r.get("album"))
         
         # --- 2. EVERYTHING ELSE: Trust YouTube Music FIRST for higher quality data ---
         r["music_directors"] = meta.get("music_directors", [])
@@ -1278,15 +1315,26 @@ def compute_all_time(records, durations, monthly_stats, yearly_stats):
     }
 
 def compute_full_history(records, durations):
-    history = [{
-        "title":            r.get("saavn_name") or r["title"],
-        "artist":           ", ".join(r.get("artists", [r["artist"]])),  # <-- FIX: Send all featured artists!
-        "album":            r.get("album"),
-        "image":            r.get("image"),
-        "video_id":         r["video_id"],
-        "played_at":        r["timestamp"].strftime("%Y-%m-%d %H:%M"),
-        "duration_seconds": durations.get(r["video_id"], DEFAULT_TRACK_DURATION),
-    } for r in records]
+    def row(r):
+        shown_title = r.get("saavn_name") or r["title"]
+        item = {
+            "title":            shown_title,
+            "artist":           ", ".join(r.get("artists", [r["artist"]])),  # <-- FIX: Send all featured artists!
+            "album":            r.get("album"),
+            "image":            r.get("image"),
+            "video_id":         r["video_id"],
+            "played_at":        r["timestamp"].strftime("%Y-%m-%d %H:%M"),
+            "duration_seconds": durations.get(r["video_id"], DEFAULT_TRACK_DURATION),
+        }
+        # The title as actually played, which identifies the song when fixing
+        # a wrong match. Only when it differs, since these rows add up.
+        if shown_title != r["title"]:
+            item["source_title"] = r["title"]
+        if r.get("corrected"):
+            item["corrected"] = True
+        return item
+
+    history = [row(r) for r in records]
     history.sort(key=lambda x: x["played_at"], reverse=True)
     return history
 
@@ -1360,6 +1408,7 @@ def clear_data():
                 # Without this the cached dashboard kept coming back on the
                 # next login even after "Clear Data".
                 cur.execute("DELETE FROM user_cache WHERE username = %s", (user_id,))
+                cur.execute("DELETE FROM track_overrides WHERE username = %s", (user_id,))
             conn.commit()
             
         return jsonify({"status": "success", "message": "User data cleared."})
@@ -1519,6 +1568,91 @@ def publish_link():
     except Exception as e:
         app.logger.error(f"Error publishing link: {e}")
         return jsonify({"error": str(e)}), 500
+
+# ── Fixing a wrong song ──────────────────────────────────
+
+YTM_UNAVAILABLE_MESSAGE = "YouTube Music can't be reached right now. Try again in a few minutes."
+
+def song_search_result(r):
+    thumbnails = r.get("thumbnails") or []
+    return {
+        "video_id": r.get("videoId"),
+        "title": r.get("title"),
+        "artist": ", ".join(a["name"] for a in r.get("artists") or []),
+        "album": (r.get("album") or {}).get("name"),
+        "duration": r.get("duration"),
+        "image": thumbnails[-1]["url"] if thumbnails else None,
+    }
+
+@app.route("/api/song_search", methods=["GET"])
+@require_auth
+def song_search():
+    query = (request.args.get("q") or "").strip()[:200]
+    if not query:
+        return jsonify({"results": []})
+    try:
+        # Some tracks only exist on YouTube Music as videos.
+        results = yt_call("search", query, filter="songs", limit=10) or yt_call("search", query, filter="videos", limit=10) or []
+    except YTMusicUnavailable:
+        return jsonify({"error": YTM_UNAVAILABLE_MESSAGE}), 503
+    return jsonify({"results": [song_search_result(r) for r in results[:10] if r.get("videoId")]})
+
+def user_has_played(user_id, title):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM listens WHERE username = %s AND title = %s LIMIT 1", (user_id, title))
+            return cur.fetchone() is not None
+
+@app.route("/api/song_fix", methods=["POST"])
+@require_auth
+def song_fix():
+    """Point every play of a title at the song the user picked, for this user only."""
+    body = request.get_json(force=True) or {}
+    title, video_id = body.get("title"), body.get("video_id")
+    if not isinstance(title, str) or not title or not isinstance(video_id, str) or not re.fullmatch(r"[\w-]{11}", video_id):
+        return jsonify({"error": "That doesn't look like a valid song."}), 400
+    if not user_has_played(g.user_id, title):
+        return jsonify({"error": "We couldn't find that play. Wait for the sync to finish, then try again."}), 404
+
+    # Details come from YouTube Music rather than the browser, because friends
+    # can see what's saved here (artist names, song titles).
+    try:
+        playlist = yt_call("get_watch_playlist", videoId=video_id) or {}
+    except YTMusicUnavailable:
+        return jsonify({"error": YTM_UNAVAILABLE_MESSAGE}), 503
+    track = next(iter(playlist.get("tracks") or []), None)
+    if not track or track.get("videoId") != video_id:
+        return jsonify({"error": "YouTube Music couldn't load that song. Try another result."}), 404
+
+    meta = build_match_meta(track, title)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO track_overrides (username, title, meta) VALUES (%s, %s, %s)
+                ON CONFLICT (username, title) DO UPDATE SET meta = EXCLUDED.meta
+            """, (g.user_id, title, json.dumps(meta)))
+        conn.commit()
+
+    return jsonify({"fix": {
+        "title": meta["saavn_name"],
+        "artist": meta["artist"],
+        "album": meta["album"],
+        "image": meta["image"],
+        "video_id": meta["real_video_id"],
+        "corrected": True,
+    }})
+
+@app.route("/api/song_fix/reset", methods=["POST"])
+@require_auth
+def song_fix_reset():
+    title = (request.get_json(force=True) or {}).get("title")
+    if not isinstance(title, str) or not title:
+        return jsonify({"error": "That doesn't look like a valid song."}), 400
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM track_overrides WHERE username = %s AND title = %s", (g.user_id, title))
+        conn.commit()
+    return jsonify({"status": "success"})
 
 # ── Friends ──────────────────────────────────────────────
 
@@ -1789,6 +1923,7 @@ def analyze():
             return jsonify({"error": "No valid entries found from Takeout or History."}), 400
 
         # --- 5.5: THE GHOST TRACK KILLER ---
+        hidden_set = set()
         if user_id:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -1805,6 +1940,12 @@ def analyze():
         enrich_artists(records, user_id)
         if user_id:
             save_history(user_id, records)
+
+        # Matching can change a play's video ID (a stored Last.fm ID becomes
+        # the real one, or a corrected song's), and hiding uses the ID on show.
+        records = [r for r in records if r["video_id"] not in hidden_set]
+        if not records:
+            return jsonify({"error": "No valid entries found from Takeout or History."}), 400
 
         set_progress(user_id, "Crunching your stats...")
 
