@@ -4,6 +4,7 @@ import styles from './AllTimeCapsule.module.css'
 import TopRankings from './TopRankings.jsx'
 import Highlights from './Highlights.jsx'
 import ArtistAllTime from './ArtistAllTime.jsx'
+import HistorySection from './HistorySection.jsx'
 
 function formatMinutes(mins) {
   const h = Math.floor(Math.round(mins) / 60)
@@ -13,7 +14,7 @@ function formatMinutes(mins) {
 }
 
 // Lifetime view across every month of history.
-export default function AllTimeCapsule({ data }) {
+export default function AllTimeCapsule({ data, allHistory, onRefresh }) {
   const [artistDetail, setArtistDetail] = useState(null)
   const [showMore, setShowMore] = useState(false)
   const [artFailed, setArtFailed] = useState(false)
@@ -118,6 +119,10 @@ export default function AllTimeCapsule({ data }) {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{ marginTop: '32px' }}>
+        <HistorySection history={allHistory} onRefresh={onRefresh} />
       </div>
 
       {artistDetail && (

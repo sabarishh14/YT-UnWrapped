@@ -1,0 +1,356 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--text-muted);
+}
+
+.count {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--chip-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+
+/* ── Search ── */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.searchBox {
+  position: relative;
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.searchBox input {
+  width: 100%;
+  padding: 11px 38px 11px 40px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.searchBox input::placeholder {
+  color: var(--text-muted);
+}
+
+.searchBox input:focus {
+  border-color: rgba(255, 60, 0, 0.6);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.searchIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.clearBtn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clearBtn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  background: var(--chip-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.chipActive,
+.chipActive:hover {
+  background: rgba(255, 0, 0, 0.15);
+  border-color: rgba(255, 0, 0, 0.45);
+  color: white;
+}
+
+.summaryRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.summary {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.summary strong {
+  color: white;
+  font-weight: 600;
+}
+
+/* ── Table ── */
+.table {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+
+.head,
+.row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.5fr) minmax(0, 1.5fr) 124px;
+  gap: 16px;
+  align-items: center;
+}
+
+.head {
+  padding: 12px 24px;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.body {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.body::-webkit-scrollbar { width: 3px; }
+.body::-webkit-scrollbar-thumb { background: var(--border-subtle); border-radius: 2px; }
+
+.row {
+  position: relative;
+  padding: 11px 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  text-decoration: none;
+  color: inherit;
+  transition: background var(--transition);
+}
+
+.row:last-child { border-bottom: none; }
+.row:hover { background: rgba(255, 255, 255, 0.03); }
+.row:hover .title { color: var(--yt-red); }
+
+.idx {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.songCol {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.image,
+.imageFallback {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+.image {
+  object-fit: cover;
+}
+
+.imageFallback {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.songText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--transition);
+  letter-spacing: -0.1px;
+}
+
+.meta,
+.played,
+.compactMeta {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compactMeta {
+  display: none;
+}
+
+/* ── Row actions ── */
+.actions {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 1;
+}
+
+.row:hover .actions,
+.row:focus-within .actions {
+  opacity: 1;
+}
+
+.actionBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.actionBtn:hover {
+  color: #ff4444;
+  border-color: rgba(255, 68, 68, 0.4);
+  background: rgba(255, 68, 68, 0.1);
+}
+
+.showMore {
+  align-self: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--chip-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 9px 28px;
+  transition: all var(--transition);
+  cursor: pointer;
+  letter-spacing: -0.1px;
+}
+
+.showMore:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* Phones: artist, album and date move under the title so they stay readable
+   (a search by artist has to show the artist). */
+@media (max-width: 768px) {
+  .head {
+    display: none;
+  }
+
+  .row {
+    grid-template-columns: 26px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px 52px 12px 14px;
+  }
+
+  .row > .meta,
+  .row > .played {
+    display: none;
+  }
+
+  .compactMeta {
+    display: block;
+  }
+
+  .actions {
+    right: 8px;
+    opacity: 0.7;
+  }
+
+  .actionBtn {
+    background: transparent;
+    border: none;
+  }
+
+  /* Below 16px, iOS zooms the page in when the box is tapped. */
+  .searchBox input {
+    font-size: 16px;
+  }
+}

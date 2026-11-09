@@ -140,6 +140,13 @@ export default function DashboardPage({ data, onRefresh }) {
     return months_available.filter(m => m.startsWith(viewYear))
   }, [months_available, viewYear])
 
+  // Every play across every month, newest first, for all-time search.
+  const allHistory = useMemo(() => {
+    return Object.values(monthly_stats || {})
+      .flatMap(m => m.history || [])
+      .sort((a, b) => b.played_at.localeCompare(a.played_at))
+  }, [monthly_stats])
+
   const isAllTime = selectedMonth === ALL_TIME
   const isYearView = !isAllTime && !selectedMonth.includes('-')
 
@@ -333,13 +340,14 @@ export default function DashboardPage({ data, onRefresh }) {
           </div>
 
           {isAllTime ? (
-            <AllTimeCapsule data={capsuleData} />
+            <AllTimeCapsule data={capsuleData} allHistory={allHistory} onRefresh={onRefresh} />
           ) : isYearView ? (
             <YearWrappedCapsule
               data={capsuleData}
               yearLabel={selectedMonth}
               onRefresh={onRefresh}
               artistProfiles={all_time?.artist_profiles}
+              allHistory={allHistory}
             />
           ) : (
             <MonthCapsule
@@ -347,6 +355,7 @@ export default function DashboardPage({ data, onRefresh }) {
               monthLabel={`${FULL_MONTH_NAMES[month - 1]} ${year}`}
               onRefresh={onRefresh}
               artistProfiles={all_time?.artist_profiles}
+              allHistory={allHistory}
             />
           )}
         </div>

@@ -6,6 +6,7 @@ import StoryMode from './StoryMode.jsx';
 import Highlights from './Highlights.jsx'
 import { apiFetch } from '../api.js'
 import ArtistAllTime from './ArtistAllTime.jsx'
+import HistorySection from './HistorySection.jsx'
 
 function formatMinutes(mins) {
   if (!mins || mins === 0) return '0m'
@@ -115,110 +116,7 @@ function TimeBreakdown({ monthly, dow, hours }) {
   )
 }
 
-// Accept the new prop
-function HistorySection({ history, onRefresh, isReadOnly }) {  
-  const [expanded, setExpanded] = React.useState(false)
-  const [hiddenIds, setHiddenIds] = React.useState(new Set()) // Track hidden songs instantly
-
-  const handleHideTrack = async (e, video_id) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
-    // 1. Optimistic UI: Instantly vanish the row from the screen
-    setHiddenIds(prev => new Set(prev).add(video_id))
-
-    if (!auth.currentUser) return
-
-    try {
-      await apiFetch('/api/hide_track', {
-        method: 'POST',
-        body: JSON.stringify({ video_id })
-      })
-      
-      // 2. Tell the Navbar to update the hidden list!
-      window.dispatchEvent(new Event('trackHidden'));
-
-      // 3. Silently update the Dashboard Playtime/Top Artists
-      if (onRefresh) onRefresh()
-
-    } catch (err) {
-      console.error("Failed to hide track:", err)
-    }
-  }
-
-  // Filter out the hidden tracks before we render the list
-  const activeHistory = (history || []).filter(item => !hiddenIds.has(item.video_id))
-  const visible = expanded ? activeHistory : activeHistory.slice(0, 50)
-
-  return (
-    <div className={styles.section}>
-      <div className={styles.historyHeader}>
-        <div className={styles.sectionLabel}>Full History</div>
-        <span className={styles.historyCount}>{activeHistory.length.toLocaleString()} plays</span>
-      </div>
-
-      <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch', paddingBottom: '12px' }}>
-        <div className={styles.historyTable} style={{ minWidth: '600px' }}>
-          
-          <div className={styles.historyHead}>
-            <span>#</span>
-            <span>Song</span>
-            <span>Artist</span>
-            <span>Album</span>
-          </div>
-          
-          <div className={styles.historyBody}>
-            {(visible || []).map((item, i) => (
-              <a
-                // CRITICAL FIX: A stable key stops React from redrawing 500 rows at once!
-                key={`${item.video_id}-${item.played_at}`} 
-                className={styles.historyRow}
-                href={`https://music.youtube.com/watch?v=${item.video_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <span className={styles.historyIdx}>{i + 1}</span>
-                <div className={styles.historySongCol}>
-                  {item.image ? (
-                    <img src={item.image} alt="Album Art" className={styles.historyImage} loading="lazy" />
-                  ) : (
-                    <div className={styles.historyImageFallback}>🎵</div>
-                  )}
-                  <span className={styles.historyTitle} title={item.title}>{item.title}</span>
-                </div>
-                <span className={styles.historyArtist} title={item.artist}>{item.artist}</span>
-                <span className={styles.historyAlbum} title={item.album}>{item.album || '-'}</span>
-                
-                {/* --- WIRED UP: Hide Track Button (Hidden from friends!) --- */}
-                {!isReadOnly && (
-                  <button 
-                    className={styles.hideBtn} 
-                    onClick={(e) => handleHideTrack(e, item.video_id)}
-                    title="Hide this track from your stats"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
-                    </svg>
-                  </button>
-                )}
-
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {activeHistory.length > 50 && (
-        <button className={styles.showMore} onClick={() => setExpanded(e => !e)}>
-          {expanded ? 'Show less' : `Show all ${activeHistory.length.toLocaleString()} plays`}
-        </button>
-      )}
-    </div>
-  )
-}
-
-export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadOnly = false, artistProfiles }) {
+export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadOnly = false, artistProfiles, allHistory }) {
   const [artistDetail, setArtistDetail] = React.useState(null)
   const capsuleRef = React.useRef(null)
   const posterRef = React.useRef(null) 
@@ -594,6 +492,13 @@ export default function YearWrappedCapsule({ data, yearLabel, onRefresh, isReadO
             )}
           </button>
 
+        </div>
+      )}
+
+      {/* ── Full History (Hidden from friends!) ── */}
+      {!isReadOnly && (
+        <div style={{ marginTop: '32px' }}>
+          <HistorySection history={history} allHistory={allHistory} periodLabel={yearLabel} onRefresh={onRefresh} />
         </div>
       )}
 
