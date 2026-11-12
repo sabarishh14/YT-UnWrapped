@@ -935,7 +935,12 @@ def enrich_artists(records: list, user_id: str) -> None:
         r["corrected"]  = bool(override)
         # The user's correction wins, then the album this play really came
         # from, then whichever version of the song we matched for this title.
-        r["album"]      = meta.get("album") if override else (r.get("scrobbled_album") or meta.get("album") or r.get("album"))
+        # (A picked song can lack an album when YouTube Music only has its
+        # song page, so fall back to Last.fm's for that play.)
+        if override:
+            r["album"] = meta.get("album") or r.get("scrobbled_album")
+        else:
+            r["album"] = r.get("scrobbled_album") or meta.get("album") or r.get("album")
         
         # --- 2. EVERYTHING ELSE: Trust YouTube Music FIRST for higher quality data ---
         r["music_directors"] = meta.get("music_directors", [])
@@ -1666,13 +1671,42 @@ YTM_UNAVAILABLE_MESSAGE = "YouTube Music can't be reached right now. Try again i
 def song_search_result(r):
     # Search results call it 'thumbnails', watch-playlist tracks 'thumbnail'.
     thumbnails = r.get("thumbnails") or r.get("thumbnail") or []
+    seconds = r.get("duration_seconds")
     return {
         "video_id": r.get("videoId"),
         "title": r.get("title"),
         "artist": ", ".join(a["name"] for a in r.get("artists") or []),
         "album": (r.get("album") or {}).get("name"),
-        "duration": r.get("duration") or r.get("length"),
+        "duration": r.get("duration") or r.get("length") or (f"{seconds // 60}:{seconds % 60:02d}" if seconds else None),
         "image": thumbnails[-1]["url"] if thumbnails else None,
+    }
+
+def resolve_video_track(video_id):
+    """The song behind a video ID, shaped like a search result, or None.
+    Raises YTMusicUnavailable. The watch playlist is the usual source, but it
+    can come back empty for songs YouTube marks unplayable (region-locked
+    releases), especially for a server's IP, while the song page still loads."""
+    playlist = yt_call("get_watch_playlist", videoId=video_id) or {}
+    track = next(iter(playlist.get("tracks") or []), None)
+    if track and track.get("videoId") == video_id:
+        return track
+
+    app.logger.warning(f"[YTMusic] watch playlist had no track for {video_id}; trying the song page")
+    details = (yt_call("get_song", video_id) or {}).get("videoDetails") or {}
+    if details.get("videoId") != video_id or not details.get("title"):
+        return None
+    author = re.sub(r"\s*-\s*Topic$", "", details.get("author") or "")
+    # The song page has no album; a search usually lists the same video with one.
+    found = yt_call("search", f"{details['title']} {author}", filter="songs", limit=10) or []
+    match = next((r for r in found if r.get("videoId") == video_id), None)
+    if match:
+        return match
+    return {
+        "videoId": video_id,
+        "title": details["title"],
+        "artists": [{"name": a} for a in re.split(r"\s*(?:,|&)\s*", author) if a],
+        "thumbnails": (details.get("thumbnail") or {}).get("thumbnails") or [],
+        "duration_seconds": int(details["lengthSeconds"]) if str(details.get("lengthSeconds", "")).isdigit() else None,
     }
 
 # music.youtube.com/watch?v=ID, youtube.com/watch?v=ID, youtu.be/ID, /shorts/ID
@@ -1691,11 +1725,10 @@ def song_search():
     if link:
         video_id = link.group(1)
         try:
-            playlist = yt_call("get_watch_playlist", videoId=video_id) or {}
+            track = resolve_video_track(video_id)
         except YTMusicUnavailable:
             return jsonify({"error": YTM_UNAVAILABLE_MESSAGE}), 503
-        track = next(iter(playlist.get("tracks") or []), None)
-        if not track or track.get("videoId") != video_id:
+        if not track:
             return jsonify({"error": "Couldn't find that link on YouTube Music. Check it's a song or video link."}), 404
         return jsonify({"results": [song_search_result(track)], "from_link": True})
 
@@ -1727,11 +1760,10 @@ def song_fix():
     # Details come from YouTube Music rather than the browser, because friends
     # can see what's saved here (artist names, song titles).
     try:
-        playlist = yt_call("get_watch_playlist", videoId=video_id) or {}
+        track = resolve_video_track(video_id)
     except YTMusicUnavailable:
         return jsonify({"error": YTM_UNAVAILABLE_MESSAGE}), 503
-    track = next(iter(playlist.get("tracks") or []), None)
-    if not track or track.get("videoId") != video_id:
+    if not track:
         return jsonify({"error": "YouTube Music couldn't load that song. Try another result."}), 404
 
     meta = build_match_meta(track, title)
