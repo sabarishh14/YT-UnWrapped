@@ -1077,23 +1077,25 @@ def compute_top_music_directors(records, durations):
     return [{"name": a, "minutes": round(m, 1)} for a, m in sorted_md[:10]]
 
 def compute_top_songs_by_plays(records, durations, limit=10):
-    song_plays  = defaultdict(int)
-    song_meta = {}
+    # One entry per song, even when some plays came from the single and some
+    # from the album. Shown under whichever version was played most.
+    song_plays = Counter()
+    version_plays = defaultdict(Counter)
+    version_meta = {}
     for r in records:
         dur = durations.get(r["video_id"], DEFAULT_TRACK_DURATION)
         if dur >= MIN_PLAY_SECONDS:
-            # Group by Title + Artist to merge different versions of the exact same song
             title = r.get("saavn_name") or r["title"]
-            key = f"{title}_{r['artist']}"
-            
+            key = song_key(r)
             song_plays[key] += 1
-            if key not in song_meta:
+            version_plays[key][title] += 1
+            if (key, title) not in version_meta:
                 # Join all the featured artists back together with a comma!
                 full_artist_string = ", ".join(r.get("artists", [r["artist"]]))
-                song_meta[key] = {"name": title, "artist": full_artist_string, "video_id": r["video_id"], "image": r.get("image")}
+                version_meta[(key, title)] = {"name": title, "artist": full_artist_string, "video_id": r["video_id"], "image": r.get("image")}
 
-    sorted_s = sorted(song_plays.items(), key=lambda x: x[1], reverse=True)
-    return [{**song_meta[k], "plays": p} for k, p in sorted_s[:limit]]
+    return [{**version_meta[(k, version_plays[k].most_common(1)[0][0])], "plays": p}
+            for k, p in song_plays.most_common(limit)]
 
 def compute_streak(records):
     if not records:
@@ -1147,12 +1149,12 @@ def compute_throwback(all_months, target_month):
     ref_plays, ref_meta, cur_plays = defaultdict(int), {}, defaultdict(int)
     
     for r in all_months[ref_month]:
-        key = f"{r.get('saavn_name') or r['title']}_{r['artist']}"
+        key = song_key(r)
         ref_plays[key] += 1
         ref_meta[key] = (r.get('saavn_name') or r['title'], r["artist"], r["video_id"])
         
     for r in all_months[target_month]:
-        key = f"{r.get('saavn_name') or r['title']}_{r['artist']}"
+        key = song_key(r)
         cur_plays[key] += 1
         
     top_then = sorted(ref_plays.items(), key=lambda x: x[1], reverse=True)[:5]
@@ -1224,8 +1226,16 @@ def get_user_tz(tz_name):
     except (ZoneInfoNotFoundError, ValueError):
         return timezone.utc
 
+FROM_TAG = re.compile(r'\s*[\(\[]\s*(?:from|feat\.?|ft\.?|featuring)\s+[^\)\]]*[\)\]]', re.IGNORECASE)
+
+def song_base_name(name):
+    """'Killin' 'em (From "Scene")' -> "Killin' 'em". The single and the
+    album track are the same song, and so is a "(feat. X)" credit. Real
+    variants ("Orchestral Version", "Punjabi Version") stay separate."""
+    return re.sub(r"\s+", " ", FROM_TAG.sub("", name or "")).strip().lower()
+
 def song_key(r):
-    return f"{r.get('saavn_name') or r['title']}_{r['artist']}"
+    return f"{song_base_name(r.get('saavn_name') or r['title'])}_{r['artist']}"
 
 def _day_label(d):
     return f"{d:%b} {d.day}"
@@ -1654,22 +1664,42 @@ def publish_link():
 YTM_UNAVAILABLE_MESSAGE = "YouTube Music can't be reached right now. Try again in a few minutes."
 
 def song_search_result(r):
-    thumbnails = r.get("thumbnails") or []
+    # Search results call it 'thumbnails', watch-playlist tracks 'thumbnail'.
+    thumbnails = r.get("thumbnails") or r.get("thumbnail") or []
     return {
         "video_id": r.get("videoId"),
         "title": r.get("title"),
         "artist": ", ".join(a["name"] for a in r.get("artists") or []),
         "album": (r.get("album") or {}).get("name"),
-        "duration": r.get("duration"),
+        "duration": r.get("duration") or r.get("length"),
         "image": thumbnails[-1]["url"] if thumbnails else None,
     }
+
+# music.youtube.com/watch?v=ID, youtube.com/watch?v=ID, youtu.be/ID, /shorts/ID
+YOUTUBE_LINK = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/)|youtu\.be/)([\w-]{11})")
 
 @app.route("/api/song_search", methods=["GET"])
 @require_auth
 def song_search():
-    query = (request.args.get("q") or "").strip()[:200]
+    query = (request.args.get("q") or "").strip()[:500]
     if not query:
         return jsonify({"results": []})
+
+    # A pasted link: show exactly that song, for when searching by name keeps
+    # turning up covers and remixes.
+    link = YOUTUBE_LINK.search(query)
+    if link:
+        video_id = link.group(1)
+        try:
+            playlist = yt_call("get_watch_playlist", videoId=video_id) or {}
+        except YTMusicUnavailable:
+            return jsonify({"error": YTM_UNAVAILABLE_MESSAGE}), 503
+        track = next(iter(playlist.get("tracks") or []), None)
+        if not track or track.get("videoId") != video_id:
+            return jsonify({"error": "Couldn't find that link on YouTube Music. Check it's a song or video link."}), 404
+        return jsonify({"results": [song_search_result(track)], "from_link": True})
+
+    query = query[:200]
     try:
         # Some tracks only exist on YouTube Music as videos.
         results = yt_call("search", query, filter="songs", limit=10) or yt_call("search", query, filter="videos", limit=10) or []

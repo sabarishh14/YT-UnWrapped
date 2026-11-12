@@ -10,6 +10,7 @@ export default function FixSongModal({ item, sourceTitle, playCount, onClose, on
   const [searching, setSearching] = useState(false)
   const [saving, setSaving] = useState(null)
   const [error, setError] = useState('')
+  const [fromLink, setFromLink] = useState(false)
   const latestSearch = useRef(0)
 
   const search = async (text) => {
@@ -24,9 +25,11 @@ export default function FixSongModal({ item, sourceTitle, playCount, onClose, on
       if (request !== latestSearch.current) return  // a newer search won
       if (!res.ok) throw new Error(data.error)
       setResults(data.results || [])
+      setFromLink(Boolean(data.from_link))
     } catch (e) {
       if (request !== latestSearch.current) return
       setResults([])
+      setFromLink(false)
       setError(e.message || "Search didn't work. Try again.")
     }
     setSearching(false)
@@ -98,7 +101,16 @@ export default function FixSongModal({ item, sourceTitle, playCount, onClose, on
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Search YouTube Music"
+            onPaste={e => {
+              // A pasted link needs no extra click on Search.
+              const text = e.clipboardData.getData('text').trim()
+              if (/youtube\.com|youtu\.be/i.test(text)) {
+                e.preventDefault()
+                setQuery(text)
+                search(text)
+              }
+            }}
+            placeholder="Search, or paste a YouTube Music link"
             aria-label="Search YouTube Music"
             autoComplete="off"
             spellCheck="false"
@@ -108,6 +120,10 @@ export default function FixSongModal({ item, sourceTitle, playCount, onClose, on
         </form>
 
         {error && <p className={styles.error} role="alert">{error}</p>}
+
+        {fromLink && !searching && results?.length > 0 && (
+          <p className={styles.linkNote}>The song from your link. Tap it to use it.</p>
+        )}
 
         <div className={styles.results}>
           {results === null || searching ? (

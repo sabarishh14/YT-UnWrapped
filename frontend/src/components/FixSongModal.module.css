@@ -113,6 +113,11 @@
   line-height: 1.4;
 }
 
+.linkNote {
+  font-size: 13px;
+  color: #4ade80;
+}
+
 .results {
   flex: 1;
   min-height: 160px;
